@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Node / Remotion
+node_modules/
+/tmp/
+*.log
+.DS_Store
+
+# Output renders & audio caches
+*.mp4
+*.wav
+*.ogg
+logs/

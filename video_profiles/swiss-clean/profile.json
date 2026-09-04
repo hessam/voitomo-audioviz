@@ -1,0 +1,38 @@
+{
+  "id": "swiss_clean",
+  "name": "Swiss Clean",
+  "palette": {
+    "background": "#EBEBEB",
+    "activeWord": "#000000",
+    "inactiveWord": "#888888",
+    "accent": "#E63946"
+  },
+  "sceneThemes": [
+    {
+      "bg": "#EAEAEA",
+      "tagPrimary": { "bg": "#000000", "text": "#FFFFFF" },
+      "tagAlt": { "bg": "#FFFFFF", "text": "#000000" }
+    },
+    {
+      "bg": "#4F39F6",
+      "tagPrimary": { "bg": "#FFFFFF", "text": "#000000" },
+      "tagAlt": { "bg": "#000000", "text": "#FFFFFF" }
+    },
+    {
+      "bg": "#121212",
+      "tagPrimary": { "bg": "#FFFFFF", "text": "#000000" },
+      "tagAlt": { "bg": "#E63946", "text": "#FFFFFF" }
+    }
+  ],
+  "typography": {
+    "fontFamily": "Vazirmatn",
+    "fontSize": 56,
+    "fontWeight": 900,
+    "tagPadding": "14px 34px",
+    "tagRadius": "4px",
+    "lineHeight": 1.15
+  },
+  "motion": {
+    "spring": { "damping": 14, "stiffness": 360, "mass": 0.55 }
+  }
+}

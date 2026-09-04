@@ -1,0 +1,38 @@
+{
+  "id": "tiktok_pop",
+  "name": "TikTok Pop",
+  "palette": {
+    "background": "#FFE600",
+    "activeWord": "#FE2C55",
+    "inactiveWord": "#666666",
+    "accent": "#FE2C55"
+  },
+  "sceneThemes": [
+    {
+      "bg": "#FFE600",
+      "tagPrimary": { "bg": "#000000", "text": "#FFFFFF" },
+      "tagAlt": { "bg": "#FFFFFF", "text": "#000000" }
+    },
+    {
+      "bg": "#00F0FF",
+      "tagPrimary": { "bg": "#000000", "text": "#FFFFFF" },
+      "tagAlt": { "bg": "#FE2C55", "text": "#FFFFFF" }
+    },
+    {
+      "bg": "#111111",
+      "tagPrimary": { "bg": "#FE2C55", "text": "#FFFFFF" },
+      "tagAlt": { "bg": "#FFFFFF", "text": "#000000" }
+    }
+  ],
+  "typography": {
+    "fontFamily": "Vazirmatn",
+    "fontSize": 60,
+    "fontWeight": 900,
+    "tagPadding": "16px 36px",
+    "tagRadius": "12px",
+    "lineHeight": 1.15
+  },
+  "motion": {
+    "spring": { "damping": 12, "stiffness": 400, "mass": 0.5 }
+  }
+}

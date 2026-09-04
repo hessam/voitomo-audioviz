@@ -1,0 +1,9 @@
+{
+  "profiles": ["swiss_clean", "dark_neon", "tiktok_pop"],
+  "default": "swiss_clean",
+  "paths": {
+    "swiss_clean": "/root/workspace/video_profiles/swiss-clean/profile.json",
+    "dark_neon": "/root/workspace/video_profiles/dark-neon/profile.json",
+    "tiktok_pop": "/root/workspace/video_profiles/tiktok-pop/profile.json"
+  }
+}

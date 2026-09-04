@@ -1,0 +1,38 @@
+{
+  "id": "dark_neon",
+  "name": "Dark Neon",
+  "palette": {
+    "background": "#0D0D12",
+    "activeWord": "#00F5D4",
+    "inactiveWord": "#444444",
+    "accent": "#00F5D4"
+  },
+  "sceneThemes": [
+    {
+      "bg": "#0D0D12",
+      "tagPrimary": { "bg": "#00F5D4", "text": "#000000" },
+      "tagAlt": { "bg": "#1F1F2E", "text": "#FFFFFF" }
+    },
+    {
+      "bg": "#19002E",
+      "tagPrimary": { "bg": "#F72585", "text": "#FFFFFF" },
+      "tagAlt": { "bg": "#0D0D12", "text": "#00F5D4" }
+    },
+    {
+      "bg": "#050508",
+      "tagPrimary": { "bg": "#FFFFFF", "text": "#000000" },
+      "tagAlt": { "bg": "#7209B7", "text": "#FFFFFF" }
+    }
+  ],
+  "typography": {
+    "fontFamily": "Vazirmatn",
+    "fontSize": 56,
+    "fontWeight": 900,
+    "tagPadding": "14px 34px",
+    "tagRadius": "8px",
+    "lineHeight": 1.15
+  },
+  "motion": {
+    "spring": { "damping": 13, "stiffness": 380, "mass": 0.5 }
+  }
+}

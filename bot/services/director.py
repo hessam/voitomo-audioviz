@@ -23,17 +23,10 @@ VALID_ICONS = [
 
 STOP_WORDS = {
     "از", "به", "در", "رو", "که", "با", "برای", "این", "آن", "یه", "هم", "توی",
-    "شد", "و", "یا", "تا", "بر", "من", "تو", "او", "ما", "شما", "آنها", "هستش",
-    "است", "بود", "شد", "دارم", "کردم", "میکنم", "می‌کنم", "میدیم", "می‌دیم", "شیش",
-    "سالی", "ساکن", "اینجا", "پونزه", "شونزه", "هست", "کار", "یکی", "خودم", "بوده",
-    "داشته", "باشه", "باشیم", "کردیم", "چون", "ولی", "اما", "اگر", "دیگه", "فقط",
-    "اضافه", "کمک", "توش", "اسم", "واقع", "قبیتاً"
+    "تو", "شد", "و", "یا", "تا", "بر", "من", "تو", "او", "ما", "شما", "آنها",
+    "هستش", "است", "بود", "شد", "چون", "ولی", "اما", "اگر", "دیگه", "فقط",
+    "چه", "چرا", "چطور", "هر", "هیچ"
 }
-
-DOMAIN_SERVICES = [
-    "سئو و بهینه‌سازی وب", "کمپین‌های گوگل ادز", "لینکدین مارکتینگ B2B",
-    "استراتژی دیجیتال مارکتینگ", "توسعه و طراحی سایت", "بازاریابی محتوایی"
-]
 
 def clean_line_typography(text: str) -> str:
     """Strips trailing and leading speech punctuation to maintain executive Swiss typography."""
@@ -61,28 +54,27 @@ def validate_and_fix_timeline(scenes: List[Dict], total_frames: int, min_frames_
     Frame-accurate timeline validation:
     1. Guarantees 0-frame duration drift (exact match to total_frames)
     2. Zero gaps, zero overlaps (continuous partition)
-    3. Deduplicates repetitive trailing scenes
+    3. Handles trailing repetition without hardcoding any specific brand or person
     4. Enforces minimum scene duration
     """
     if not scenes:
         return []
 
-    # Step 1: Detect and resolve trailing narrative repetition
+    # Step 1: Detect and resolve trailing repetition dynamically
     if len(scenes) >= 2:
         last = scenes[-1]
         prev = scenes[-2]
         t_last = " ".join(last.get("lines", []))
         t_prev = " ".join(prev.get("lines", []))
         
-        # If last scene repeats significant words from previous scene (e.g. LinkedIn marketing)
-        overlap = set(t_last.split()).intersection(set(t_prev.split()))
-        if len(overlap) >= 3 or ("لینکدین" in t_last and "لینکدین" in t_prev):
-            # Transform the final scene into an executive closing CTA instead of a duplicate
+        words_last = set(t_last.split())
+        words_prev = set(t_prev.split())
+        overlap = words_last.intersection(words_prev)
+        if len(overlap) >= 3 and len(words_last) > 0 and len(overlap) / len(words_last) > 0.6:
+            # Trailing repetition detected! Convert last scene to a summary callout
             last["type"] = "CALLOUT_CARD"
-            last["lines"] = ["آژانس بازاریابی محتوالی", "هم‌مسیر رشد برند و فروش B2B"]
-            last["badgeLabel"] = "همکاری و مشاوره"
+            last["badgeLabel"] = "جمع‌بندی"
             last["theme"] = "accent"
-            last["icon"] = "Sparkles"
 
     # Step 2: Ensure strictly continuous frames
     scenes[0]["startFrame"] = 0
@@ -115,7 +107,7 @@ def validate_and_fix_timeline(scenes: List[Dict], total_frames: int, min_frames_
 def fallback_procedural_director(words: list, fps: int = 30, total_frames: int = 300) -> list:
     """
     Semantic deterministic fallback if LLM is unreachable.
-    Zero hallucinated metrics, zero prepositions on badges, and strictly enforced minimum scene duration.
+    Completely dynamic: extracts keywords and numbers exclusively from the spoken words.
     """
     if not words:
         return [{
@@ -128,14 +120,11 @@ def fallback_procedural_director(words: list, fps: int = 30, total_frames: int =
         }]
 
     global_keywords = extract_meaningful_keywords(words)
-    if len(global_keywords) < 4:
-        global_keywords = global_keywords + ["سئو", "گوگل ادز", "لینکدین", "دیجیتال مارکتینگ"]
-
     scenes = []
     chunk_words = []
     chunk_start = words[0]["start"]
     theme_cycle = ["dark", "accent", "light"]
-    archetypes = ["HERO_BLOCK", "METRIC_PUNCH", "SPLIT_VIEWPORT", "CALLOUT_CARD", "BENTO_GRID"]
+    archetypes = ["HERO_BLOCK", "SPLIT_VIEWPORT", "CALLOUT_CARD", "BENTO_GRID"]
     alignments = ["center", "right", "center", "left"]
     scene_idx = 0
     min_scene_duration_sec = 1.6
@@ -161,8 +150,7 @@ def fallback_procedural_director(words: list, fps: int = 30, total_frames: int =
 
             st_frame = int(chunk_start * fps)
             end_frame = int(w["end"] * fps)
-            atype = archetypes[scene_idx % len(archetypes)]
-
+            
             # Extract genuine number if present
             num_in_chunk = None
             for cw in chunk_words:
@@ -174,8 +162,10 @@ def fallback_procedural_director(words: list, fps: int = 30, total_frames: int =
                     except ValueError:
                         pass
 
-            if atype == "METRIC_PUNCH" and num_in_chunk is None:
-                atype = "CALLOUT_CARD" if scene_idx % 2 == 0 else "SPLIT_VIEWPORT"
+            if num_in_chunk is not None:
+                atype = "METRIC_PUNCH"
+            else:
+                atype = archetypes[scene_idx % len(archetypes)]
 
             meaningful_chunk_words = [cw for cw in chunk_words if re.sub(r"[^\w\s]", "", cw).strip() not in STOP_WORDS]
             badge_label = clean_line_typography(meaningful_chunk_words[0]) if meaningful_chunk_words else None
@@ -184,18 +174,11 @@ def fallback_procedural_director(words: list, fps: int = 30, total_frames: int =
 
             grid_items = None
             if atype == "BENTO_GRID":
-                kw_slice = [k for k in global_keywords if k not in STOP_WORDS and len(k) >= 3]
-                if len(kw_slice) < 4:
-                    kw_slice = DOMAIN_SERVICES[:4]
+                kw_slice = [k for k in global_keywords if k not in STOP_WORDS and len(k) >= 2]
+                if len(kw_slice) >= 2:
+                    grid_items = [{"title": k, "icon": VALID_ICONS[idx % len(VALID_ICONS)]} for idx, k in enumerate(kw_slice[:4])]
                 else:
-                    kw_slice = kw_slice[:4]
-
-                grid_items = [
-                    {"title": kw_slice[0], "icon": "Globe"},
-                    {"title": kw_slice[1], "icon": "Search"},
-                    {"title": kw_slice[2], "icon": "Users"},
-                    {"title": kw_slice[3], "icon": "Zap"},
-                ]
+                    atype = "CALLOUT_CARD"
 
             scene = {
                 "type": atype,
@@ -220,7 +203,7 @@ def fallback_procedural_director(words: list, fps: int = 30, total_frames: int =
 def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: int = 30, audit: Any = None) -> list:
     """
     LLM Director converts transcript tokens into a frame-accurate sequence of diverse Swiss visual scenes.
-    Exact total_frames = round(duration * fps), zero drift, no repetition, and rich archetypal variety.
+    Strictly content-grounded: NEVER hallucinates outside topics, names, or metrics.
     """
     total_frames = max(30, round(duration * fps))
     if not words:
@@ -236,22 +219,24 @@ def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: in
     prompt = (
         "You are an elite Swiss Motion Graphics Art Director creating kinetic typography for speech audio.\n\n"
         f"TOTAL DURATION IN FRAMES: {total_frames} frames (at {fps} FPS = {duration:.2f}s).\n"
-        "Your output scene sequence MUST start at frame 0 and end at EXACTLY frame " + str(total_frames) + ".\n\n"
+        f"Your output scene sequence MUST start at frame 0 and end at EXACTLY frame {total_frames}.\n\n"
         "GOAL:\n"
-        "Direct 5 or 6 distinct narrative story beats that flow logically with MAXIMUM ARCHETYPAL DIVERSITY:\n"
-        "- Beat 1 (معرفی / Identity): Speaker name & role -> type: 'HERO_BLOCK'\n"
-        "- Beat 2 (سوابق و ارقام / Milestone): Years of experience -> type: 'METRIC_PUNCH' (counterTo: 16)\n"
-        "- Beat 3 (استمرار فعالیت / Continuity): Location (Turkey) -> type: 'SPLIT_VIEWPORT'\n"
-        "- Beat 4 (آژانس و تیم / Team): Brand 'Mohtavaly' -> type: 'CALLOUT_CARD'\n"
-        "- Beat 5 (خدمات / Capabilities): The 4 core tools (SEO, Google Ads, LinkedIn, Website) -> type: 'BENTO_GRID' (provide 4 gridItems)\n"
-        "- Beat 6 (پایان و فراخوان / Climax or Outro): Specialization or closing card -> type: 'CALLOUT_CARD'\n\n"
-        "CRITICAL ARCHITECTURAL RULES:\n"
-        "1. NEVER use 'HERO_BLOCK' for all scenes! Each scene MUST use a DIFFERENT archetype from: ['HERO_BLOCK', 'METRIC_PUNCH', 'SPLIT_VIEWPORT', 'CALLOUT_CARD', 'BENTO_GRID'].\n"
-        "2. DO NOT REPEAT Beat 5 in Beat 6! Scene 6 must NOT repeat the exact lines of Scene 5.\n"
-        "3. Every line in 'lines' MUST be clean Persian.\n"
-        "4. 'badgeLabel' must be a professional Persian badge keyword, NEVER prepositions like 'رو', 'که', 'در'!\n"
-        "5. The scene startFrame/endFrame must partition 0 to " + str(total_frames) + " continuously with ZERO gap.\n"
-        "6. Output ONLY valid JSON: {\"scenes\": [...]}\n\n"
+        "Carefully read the SPEAKER FULL TRANSCRIPT below and understand WHAT THE SPEAKER IS ACTUALLY TALKING ABOUT.\n"
+        "Direct 4 to 6 coherent narrative visual scenes that faithfully reflect the real subject matter, entities, and message of THIS audio note.\n\n"
+        "ARCHETYPE SELECTION (Assign the best layout for each distinct part of the speech):\n"
+        "- 'HERO_BLOCK': Central thesis, opening hook, key assertion, or main takeaway.\n"
+        "- 'METRIC_PUNCH': Use ONLY if the speaker mentions an explicit spoken number, statistic, or year count. Set 'counterTo' to that exact spoken integer. IF NO NUMBER IS SPOKEN, DO NOT USE THIS!\n"
+        "- 'BENTO_GRID': Use when the speaker mentions multiple items, features, platforms, or tools. Provide 'gridItems': [{'title': '...', 'icon': '...'}, ...] with 3 to 4 distinct items extracted from the speech.\n"
+        "- 'SPLIT_VIEWPORT': Comparing two ideas/platforms, nuances, or contextual elaboration.\n"
+        "- 'CALLOUT_CARD': Highlighting a specific entity, platform, key warning, or focal point.\n\n"
+        "STRICT CONTENT INTEGRITY RULES (VIOLATIONS WILL BE REJECTED):\n"
+        "1. GROUNDING: Every word in 'lines' MUST be derived strictly from what THIS speaker said in the transcript. NEVER invent outside names, outside companies, outside numbers, or topics that are not in the transcript!\n"
+        "2. If the speaker does not state a name or entity, DO NOT invent one!\n"
+        "3. FAITHFUL TOPIC: The visual narrative must strictly focus on the actual subject matter spoken in the transcript. Never import outside context or prior knowledge.\n"
+        "4. DIVERSITY: Use at least 2 or 3 distinct archetypes across the scenes. Do NOT make every scene HERO_BLOCK.\n"
+        "5. 'badgeLabel' must be a concise Persian keyword (1-2 words) summarizing that scene's actual point (e.g. 'نکته کلیدی', 'رویکرد', 'بررسی'). Never prepositions!\n"
+        "6. SEAMLESS COVERAGE: startFrame and endFrame must partition 0 to " + str(total_frames) + " continuously.\n"
+        "7. Output ONLY valid JSON: {\"scenes\": [...]}\n\n"
         "SPEAKER FULL TRANSCRIPT:\n\"" + full_text + "\"\n\n"
         "WORD TOKENS WITH TIMESTAMPS:\n" + json.dumps(token_feed, ensure_ascii=False)
     )
@@ -266,7 +251,7 @@ def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: in
             json={
                 "model": LLM_MODEL,
                 "messages": [
-                    {"role": "system", "content": "You are a professional Swiss Motion Graphics Art Director. Respond strictly in valid JSON."},
+                    {"role": "system", "content": "You are a professional Swiss Motion Graphics Art Director. Direct kinetic scenes strictly grounded in the user's transcript. Respond strictly in valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.2,
@@ -334,7 +319,7 @@ def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: in
                     raw_badge = s.get("badgeLabel")
                     if raw_badge:
                         raw_badge = clean_line_typography(str(raw_badge))
-                        if raw_badge in STOP_WORDS or len(raw_badge) < 3 or raw_badge == "None":
+                        if raw_badge in STOP_WORDS or len(raw_badge) < 2 or raw_badge == "None":
                             raw_badge = None
 
                     raw_grid = s.get("gridItems") or s.get("grid_items")
@@ -396,33 +381,17 @@ def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: in
                         "gridItems": clean_grid
                     })
 
-                # Archetypal Diversity Guard: If model used all HERO_BLOCK, enforce semantic variety
-                if all(s["type"] == "HERO_BLOCK" for s in clean_scenes) or len(set(s["type"] for s in clean_scenes)) <= 2:
+                # Archetypal Diversity Guard: If model used all HERO_BLOCK, enforce layout variety based on content
+                if all(s["type"] == "HERO_BLOCK" for s in clean_scenes) or len(set(s["type"] for s in clean_scenes)) <= 1:
                     for idx, s in enumerate(clean_scenes):
-                        l_text = " ".join(s["lines"])
-                        if s.get("gridItems") or "سئو" in l_text or "SEO" in l_text or "Google Ads" in l_text:
+                        if s.get("gridItems") and len(s["gridItems"]) >= 2:
                             s["type"] = "BENTO_GRID"
-                            if not s.get("gridItems"):
-                                s["gridItems"] = [
-                                    {"title": "سئو و بهینه‌سازی وب", "icon": "Globe"},
-                                    {"title": "گوگل ادز (Google Ads)", "icon": "Search"},
-                                    {"title": "لینکدین مارکتینگ B2B", "icon": "Users"},
-                                    {"title": "طراحی و توسعه وب", "icon": "Zap"}
-                                ]
-                        elif any(ch.isdigit() for ch in l_text) or "۱۵" in l_text or "۱۶" in l_text or "سال" in l_text:
+                        elif s.get("counterTo") is not None:
                             s["type"] = "METRIC_PUNCH"
-                            s["counterTo"] = 16
-                            s["counterFrom"] = 0
-                            s["badgeLabel"] = s.get("badgeLabel") or "۱۶ سال سابقه"
-                        elif "ترکیه" in l_text or "ساکن" in l_text:
+                        elif idx % 2 == 1:
                             s["type"] = "SPLIT_VIEWPORT"
-                            s["badgeLabel"] = s.get("badgeLabel") or "فعالیت بین‌المللی"
-                        elif "محتوالی" in l_text or "تیم" in l_text:
-                            s["type"] = "CALLOUT_CARD"
-                            s["badgeLabel"] = s.get("badgeLabel") or "آژانس محتوالی"
                         elif idx == len(clean_scenes) - 1:
                             s["type"] = "CALLOUT_CARD"
-                            s["badgeLabel"] = "تخصص ارشد"
 
                 # Validate and fix timeline boundaries (exact duration, no gaps, deduplicate)
                 clean_scenes = validate_and_fix_timeline(clean_scenes, total_frames, min_frames_per_scene=max(36, int(1.2 * fps)))

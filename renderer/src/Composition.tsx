@@ -638,12 +638,7 @@ export const VoiceMotion: React.FC<DirectorProps> = ({
               >
                 {(activeScene.gridItems && activeScene.gridItems.length > 0
                   ? activeScene.gridItems
-                  : [
-                      { title: "سئو و بهینه‌سازی", icon: "TrendingUp" },
-                      { title: "کمپین‌های گوگل", icon: "Globe" },
-                      { title: "تولید محتوا", icon: "FileCode2" },
-                      { title: "برندینگ دیجیتال", icon: "Sparkles" },
-                    ]
+                  : []
                 ).map((item, gIdx) => {
                   const GridIcon = resolveIcon(item.icon);
                   const itemSpring = spring({
@@ -765,7 +760,7 @@ export const VoiceMotion: React.FC<DirectorProps> = ({
                       suffix={activeScene.metric ? "" : "+"}
                     />
                   ) : (
-                    <span>{activeScene.metric || (activeScene.badgeLabel ? activeScene.badgeLabel : "۱۶+")}</span>
+                    <span>{activeScene.metric || activeScene.badgeLabel || ""}</span>
                   )}
                   {activeScene.badgeLabel && (
                     <span
@@ -863,18 +858,22 @@ export const VoiceMotion: React.FC<DirectorProps> = ({
                   <IconComp size={30} />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column" }}>
-                  <span style={{ fontSize: "26px", fontWeight: 800 }}>
-                    {(activeScene.badgeLabel && activeScene.badgeLabel !== "None") ? activeScene.badgeLabel : "استراتژی و برند"}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      fontFamily: "Vazirmatn, sans-serif",
-                      opacity: 0.6,
-                    }}
-                  >
-                    آژانس محتوالی // B2B
-                  </span>
+                  {activeScene.badgeLabel && activeScene.badgeLabel !== "None" && (
+                    <span style={{ fontSize: "26px", fontWeight: 800 }}>
+                      {activeScene.badgeLabel}
+                    </span>
+                  )}
+                  {activeScene.eyebrow && (
+                    <span
+                      style={{
+                        fontSize: "13px",
+                        fontFamily: "Vazirmatn, sans-serif",
+                        opacity: 0.6,
+                      }}
+                    >
+                      {activeScene.eyebrow}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

@@ -1,56 +1,58 @@
 import re
 from typing import List, Dict, Tuple
 
-# Common Whisper large-v3-turbo Persian misrecognitions & typos
-PHONETIC_CORRECTIONS = {
-    r"\bمحصه\b": "مهسا",
-    r"\bمهصا\b": "مهسا",
-    r"\bحوضه\b": "حوزه",
+# Standard Persian orthographic and common ASR phoneme corrections
+# Strictly generic: NO hardcoded persona names, locations, numbers, or specific sentences.
+GENERIC_PHONETIC_CORRECTIONS = {
     r"\bدیژیتال\b": "دیجیتال",
-    r"\bترکیم\b": "ترکیه",
-    r"\bمضافه\b": "به اضافه",
-    r"\bکاری مارکتینگ\b": "کارهای مارکتینگ",
-    r"\bجذب\s*تن\s*قسمت\s*ها\b": "جذاب‌ترین قسمت‌ها",
-    r"\bجذب\s*تنقسمتها\b": "جذاب‌ترین قسمت‌ها",
-    r"\bجذاب\s*ترین\b": "جذاب‌ترین",
     r"\bلینکتین\b": "لینکدین",
-    r"\bقبیتاً\b": "",
-    r"\bساکن\s+ترکیه‌م\b": "ساکن ترکیه",
-    r"\bساکن\s+ترکیم\b": "ساکن ترکیه",
-    r"\bپونزه[،\s]+شونزه\s+سالی\b": "۱۵ الی ۱۶ سال",
-    r"\bپونزه[،\s]+شونزه\b": "۱۵-۱۶",
-    r"\bشیش\s+سالی\b": "۶ سال",
-    r"\bشیش\b": "۶"
+    r"\bحوضه(?=\s+(?:دیجیتال|مارکتینگ|کاری|علمی|فناوری|وب|تخصصی))\b": "حوزه",
 }
+
+UNICODE_NORMALIZATIONS = [
+    (re.compile(r"[\u064A\u0649]"), "ی"),  # Arabic Yeh -> Persian Yeh
+    (re.compile(r"[\u0643]"), "ک"),        # Arabic Kaf -> Persian Kaf
+    (re.compile(r"\u200c+"), "\u200c"),    # Normalize consecutive ZWNJ
+]
+
+def clean_persian_token(token: str) -> str:
+    """Applies standard Persian character normalizations to a single token."""
+    t = token
+    for pat, rep in UNICODE_NORMALIZATIONS:
+        t = pat.sub(rep, t)
+    for pat, rep in GENERIC_PHONETIC_CORRECTIONS.items():
+        t = re.sub(pat, rep, t)
+    return t
 
 def normalize_persian_asr(raw_text: str, words: List[Dict]) -> Tuple[str, List[Dict], List[Dict]]:
     """
     Normalizes raw Whisper Persian ASR text into:
-    1. clean_text: Grammatically corrected full transcript
-    2. clean_words: Word tokens with phoneme corrections, keeping timing intact
+    1. clean_text: Grammatically and orthographically normalized full transcript
+    2. clean_words: Word tokens with normalized characters, keeping timestamps intact
     3. diff_log: List of corrections made for audit reporting
     """
     clean_text = raw_text
     diff_log = []
 
-    for pattern, replacement in PHONETIC_CORRECTIONS.items():
+    # 1. Unicode character standardizations
+    for pat, rep in UNICODE_NORMALIZATIONS:
+        clean_text = pat.sub(rep, clean_text)
+
+    # 2. Generic phonetic corrections
+    for pattern, replacement in GENERIC_PHONETIC_CORRECTIONS.items():
         if re.search(pattern, clean_text):
-            old_val = re.search(pattern, clean_text).group(0)
+            for match in re.finditer(pattern, clean_text):
+                diff_log.append({"original": match.group(0), "corrected": replacement})
             clean_text = re.sub(pattern, replacement, clean_text)
-            diff_log.append({"original": old_val, "corrected": replacement})
 
-    # Clean double spaces
-    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    # Clean redundant spaces
+    clean_text = re.sub(r"[ \t]+", " ", clean_text).strip()
 
-    # Apply word-level corrections preserving timestamps
+    # Apply token-level corrections preserving timestamps
     clean_words = []
     for w in words:
         orig_w = w["word"]
-        new_w = orig_w
-        for pattern, replacement in PHONETIC_CORRECTIONS.items():
-            if re.search(pattern, new_w):
-                new_w = re.sub(pattern, replacement, new_w)
-        new_w = new_w.strip()
+        new_w = clean_persian_token(orig_w).strip()
         if new_w:
             clean_words.append({
                 "word": new_w,

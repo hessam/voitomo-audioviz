@@ -125,3 +125,24 @@ This ADR serves as the **executable specification and benchmark standard** for t
 - [x] Only one instance of `bot_run.py` can acquire the OS file lock at any given moment.
 - [x] All Whisper text passes through `normalize_persian_asr()` before reaching the Art Director.
 - [x] Generated audit markdown files accurately log audio duration, word count, clean text, and narrative beat rationales.
+- [x] **Dynamic Content Grounding (v1.0.1)**: Zero hardcoded persona entities, names, locations, metrics, or agency brands. 100% of on-screen text strictly derives from the incoming transcript.
+
+---
+
+## Addendum v1.0.1: Dynamic Content Grounding & Anti-Overfitting Firewall
+
+### Context & Failure Mode
+During initial tuning on a single test profile (Mahsa Hafezi / Mohtavaly), multiple components had persona-specific heuristics baked in:
+- Prompt instructions included specific beat examples (Years -> 16, Agency -> Mohtavaly).
+- Code fallbacks forced `counterTo = 16`, `badgeLabel = "آژانس محتوالی"`, and fallback closing text.
+- Remotion template rendered static `آژانس محتوالی // B2B` and fallback `۱۶+`.
+- ASR normalizer substituted proper nouns unconditionally (`محصه` -> `مهسا`).
+
+When a completely different voice note (Cafe Bazaar on Android/iOS/Web) was processed, the engine generated valid visual motion but leaked the previous speaker's identity and agency onto the screen.
+
+### Remediation & Architectural Standard
+1. **Prompt Neutrality**: All archetype instructions are purely structural (`HERO_BLOCK`, `METRIC_PUNCH`, `BENTO_GRID`, `SPLIT_VIEWPORT`, `CALLOUT_CARD`) with strict prohibition against external entity generation.
+2. **Dynamic Heuristics**: Numbers are only extracted if spoken in the transcript; badges default to null or dynamic keywords.
+3. **Template Purity**: Remotion UI elements only render when explicitly supplied in `activeScene`. Fallback hardcoded strings are eliminated.
+4. **ASR Orthographic Purity**: Normalization restricted to universal Persian Unicode standards and verified phonetic typos (`حوزه`, `دیجیتال`, `لینکدین`). No proper noun rewriting.
+

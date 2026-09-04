@@ -138,6 +138,54 @@ def transcribe(audio_path: str) -> dict:
         words = normalize_words_with_llm(words)
         reconstructed_text = " ".join(w["word"] for w in words) if words else " ".join(full_text_parts)
 
+        # 3. Acoustic Vocal Recovery Fallback
+        # If standard conversational Whisper detected only music tokens or <= 1 word,
+        # apply vocal formant bandpass filter + dynamic compression and re-transcribe without VAD.
+        clean_check = reconstructed_text.strip()
+        if clean_check in ("موسیقی", "[موسیقی]", "موزیک", "Music", "[music]", "") or len(words) <= 1:
+            logger.info("⚡ Detected music/non-speech token ('%s'). Running acoustic vocal recovery fallback...", clean_check)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as vtmp:
+                vocal_wav = vtmp.name
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", audio_path,
+                    "-af", "highpass=f=180,lowpass=f=4500,acompressor=threshold=-18dB:ratio=4:attack=15:release=100",
+                    "-ar", "16000", "-ac", "1", vocal_wav
+                ], capture_output=True, check=True)
+
+                fb_segs, _ = model.transcribe(
+                    vocal_wav,
+                    language="fa",
+                    task="transcribe",
+                    beam_size=5,
+                    word_timestamps=True,
+                    vad_filter=False,
+                    condition_on_previous_text=False
+                )
+
+                fb_words = []
+                for seg in fb_segs:
+                    if seg.words:
+                        for w in seg.words:
+                            w_str = w.word.strip()
+                            # Filter out non-speech tags
+                            if w_str and w_str not in ("موسیقی", "[موسیقی]", "موزیک", "music", "[music]"):
+                                fb_words.append({
+                                    "word": w_str,
+                                    "start": float(round(w.start, 3)),
+                                    "end": float(round(w.end, 3))
+                                })
+
+                if len(fb_words) > len(words):
+                    logger.info("✅ Vocal recovery extracted %d lyric words (replacing previous %d words)", len(fb_words), len(words))
+                    words = normalize_words_with_llm(fb_words)
+                    reconstructed_text = " ".join(w["word"] for w in words)
+            except Exception as e:
+                logger.warning("Vocal recovery fallback failed: %s", e)
+            finally:
+                if os.path.exists(vocal_wav):
+                    os.unlink(vocal_wav)
+
         return {
             "text": reconstructed_text.strip(),
             "words": words,

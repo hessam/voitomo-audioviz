@@ -1,0 +1,109 @@
+import os
+import re
+import subprocess
+import tempfile
+import logging
+from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+_whisper_model = None
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        logger.info("⚡ Loading faster-whisper large-v3-turbo for singing voice...")
+        _whisper_model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+    return _whisper_model
+
+def clean_lyric_token(text: str) -> str:
+    """Filters out Whisper non-speech artifacts such as [music], (موسیقی), ♪, etc."""
+    if not text:
+        return ""
+    t = text.strip()
+    # Strip bracketed hallucinations
+    t = re.sub(r"[\[\(（【].*?[\]\)）】]", "", t)
+    # Strip musical symbols
+    t = re.sub(r"[♪♫♬♩#]+", "", t)
+    # Strip redundant punctuation
+    t = re.sub(r"^[،,.\-_!?؟\s]+", "", t)
+    t = re.sub(r"[،,.\-_!?؟\s]+$", "", t)
+    return t.strip()
+
+def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Singing-Voice Persian Transcription Engine:
+    1. Suppresses non-speech [music] hallucinations.
+    2. Uses condition_on_previous_text=False to prevent repetitive cascades.
+    3. Primes ASR with poetic Persian lyrical meter.
+    4. If user provides verified lyrics, aligns them with acoustic timestamps.
+    """
+    # 1. Convert to 16kHz mono WAV
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        wav_path = tmp.name
+    
+    subprocess.run([
+        "ffmpeg", "-y", "-i", vocal_audio_path,
+        "-ar", "16000", "-ac", "1", "-f", "wav", wav_path
+    ], capture_output=True, check=True)
+
+    try:
+        model = get_whisper_model()
+        
+        # We disable condition_on_previous_text so singing pauses do not loop hallucinations
+        segments, info = model.transcribe(
+            wav_path,
+            language="fa",
+            task="transcribe",
+            beam_size=5,
+            word_timestamps=True,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=400),
+            initial_prompt="متن ترانه، شعر فارسی، کلمات آواز و موسیقی روان و بدون غلط.",
+            condition_on_previous_text=False,
+            prepend_punctuations="«\"'([{-",
+            append_punctuations="»\"'.)،!؟:;]}"
+        )
+
+        raw_words = []
+        full_text_parts = []
+
+        for seg in segments:
+            if seg.words:
+                for w in seg.words:
+                    clean_w = clean_lyric_token(w.word)
+                    # Exclude non-speech markers like 'music', 'موزیک', etc.
+                    if clean_w and clean_w.lower() not in ["music", "موزیک", "آهنگ", "موسیقی", "..."]:
+                        raw_words.append({
+                            "word": clean_w,
+                            "start": float(round(w.start, 3)),
+                            "end": float(round(w.end, 3))
+                        })
+            seg_text = clean_lyric_token(seg.text)
+            if seg_text:
+                full_text_parts.append(seg_text)
+
+        reconstructed_text = " ".join(w["word"] for w in raw_words) if raw_words else " ".join(full_text_parts)
+
+        # 2. If user supplied verified lyrics, realign them to acoustic timestamps
+        if user_lyrics and user_lyrics.strip():
+            from bot.services.alignment import realign_transcript
+            aligned_words = realign_transcript(raw_words, user_lyrics.strip(), info.duration)
+            return {
+                "text": user_lyrics.strip(),
+                "words": aligned_words,
+                "duration": info.duration,
+                "is_singing": True
+            }
+
+        return {
+            "text": reconstructed_text.strip(),
+            "words": raw_words,
+            "duration": info.duration,
+            "is_singing": True
+        }
+
+    finally:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)

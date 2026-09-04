@@ -37,6 +37,8 @@ export interface SceneData {
   counterFrom?: number;
   counterTo?: number;
   gridItems?: { icon?: string; label?: string; title?: string; bg?: string }[];
+  isLyrical?: boolean;
+  beatFrames?: number[];
 }
 
 export interface WordTiming {
@@ -52,6 +54,8 @@ export interface DirectorProps {
   durationInFrames: number;
   profile?: string;
   profileData?: any;
+  isLyrical?: boolean;
+  beatFrames?: number[];
 }
 
 /**
@@ -259,6 +263,8 @@ export const VoiceMotion: React.FC<DirectorProps> = ({
   audioSrc,
   durationInFrames,
   profileData,
+  isLyrical = false,
+  beatFrames = [],
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -463,7 +469,7 @@ export const VoiceMotion: React.FC<DirectorProps> = ({
           {String(sceneIdx).padStart(2, "0")}
         </div>
 
-        {/* Main Content Layout Canvas */}
+        {/* Main Content Layout Canvas with Audio-Reactive Beat Pulse */}
         <div
           style={{
             display: "flex",
@@ -480,6 +486,17 @@ export const VoiceMotion: React.FC<DirectorProps> = ({
             padding: "0 48px",
             direction: "rtl",
             zIndex: 10,
+            transform: `scale(${
+              (activeScene.isLyrical || isLyrical) && (activeScene.beatFrames || beatFrames || []).length > 0
+                ? interpolate(
+                    Math.min(...(activeScene.beatFrames || beatFrames || []).map((b) => Math.abs(frame - b))),
+                    [0, 4],
+                    [1.025, 1.0],
+                    { extrapolateRight: "clamp" }
+                  )
+                : 1.0
+            })`,
+            transformOrigin: "center center",
           }}
         >
           {/* =========================================================

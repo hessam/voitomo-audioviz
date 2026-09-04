@@ -31,7 +31,7 @@ def acquire_single_instance_lock():
         sys.exit(0)
 
 # Import routers with full path
-from bot.routers import voice, edit
+from bot.routers import voice, edit, music
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8655355943:AAH18lgbOPHAG7a_Op6zxH4LrfvXB5qRsdg")
 ALLOWED_USERS = set(int(x) for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "92241363,6027086169").split(","))
@@ -50,6 +50,7 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(AuthMiddleware())
     dp.include_router(voice.router)
+    dp.include_router(music.router)
     dp.include_router(edit.router)
     logger.info(f"🤖 Motion Agent started (PID {os.getpid()}). Allowed: {ALLOWED_USERS}")
     try:

@@ -44,12 +44,11 @@ async function ensureBundle() {
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", bundled: serveUrl !== null });
 });
-
 app.post("/render", async (req, res) => {
-  const { scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean" } = req.body;
+  const { scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = req.body;
 
-  if ((!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
-    return res.status(400).json({ error: "words or scenes array required" });
+  if (!creativeSpec && (!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
+    return res.status(400).json({ error: "creativeSpec, words, or scenes array required" });
   }
 
   try {
@@ -79,19 +78,27 @@ app.post("/render", async (req, res) => {
       }
     }
 
-    const inputProps = {
-      scenes: scenes || [],
-      words: words || [],
-      text: text || "",
-      audioSrc: resolvedAudioSrc,
-      durationInFrames: durationInFrames || 300,
-      profile: profileKey,
-      profileData,
-    };
+    const isSwissSpec = !!creativeSpec;
+    const inputProps = isSwissSpec
+      ? {
+          creativeSpec,
+          audioSrc: resolvedAudioSrc,
+          durationInFrames: durationInFrames || creativeSpec.meta?.total_frames || 300,
+        }
+      : {
+          scenes: scenes || [],
+          words: words || [],
+          text: text || "",
+          audioSrc: resolvedAudioSrc,
+          durationInFrames: durationInFrames || 300,
+          profile: profileKey,
+          profileData,
+        };
 
+    const targetCompositionId = isSwissSpec ? "VoitomoSwiss" : "VoiceMotion";
     const composition = await selectComposition({
       serveUrl: url,
-      id: "VoiceMotion",
+      id: targetCompositionId,
       inputProps,
     });
 

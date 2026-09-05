@@ -111,12 +111,13 @@ app.post("/render", async (req, res) => {
       codec: "h264",
       outputLocation: outPath,
       inputProps,
+      concurrency: 3,
       chromiumOptions: {
         disableWebSecurity: true,
         ignoreCertificateErrors: true,
         headless: true,
       },
-      timeoutInMilliseconds: 180000,
+      timeoutInMilliseconds: 360000,
     });
 
     console.log(`✅ Rendered: ${outPath}`);

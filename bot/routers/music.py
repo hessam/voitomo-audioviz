@@ -13,14 +13,16 @@ from aiogram.fsm.state import State, StatesGroup
 from bot.services.audio_adapter import AudioIntelligenceAdapter
 from bot.services.lyric_transcriber import transcribe_lyrics
 from bot.services.music_director import direct_music_scenes
+from bot.services.director import direct_creative_spec
 from bot.services.normalizer import normalize_persian_asr
 
 router = Router()
 RENDER_URL = "http://localhost:4000/render"
+RENDER_SEMAPHORE = asyncio.Semaphore(1)
 
 PROFILES = {
+    "swiss_clean": "✦ Swiss Generative (Glitch-Decode)",
     "dark_neon": "⚡ Dark Neon (موزیک ویدیو)",
-    "swiss_clean": "✦ Swiss Clean (تایپوگرافی تمیز)",
     "tiktok_pop": "🎬 TikTok Pop (ریتمیک پاپ)"
 }
 
@@ -152,34 +154,50 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(f"🎬 در حال کارگردانی پرده‌های ترانه و رندر روی ضرب‌آهنگ با سبک {PROFILES.get(profile_key, profile_key)}...")
 
-    # Direct kinetic scenes synced to musical beat grid
-    scenes = direct_music_scenes(
-        lyric_words=lyrics.get("words", []),
-        full_lyrics=lyrics.get("text", ""),
-        duration=lyrics.get("duration", 30.0),
-        rhythm_info=rhythm_info
-    )
-
     duration_frames = max(1, round(lyrics.get("duration", 30.0) * 30))
-    props = {
-        "scenes": scenes,
-        "words": lyrics.get("words", []),
-        "text": lyrics.get("text", ""),
-        "audioSrc": audio_path,
-        "durationInFrames": duration_frames,
-        "profile": profile_key,
-        "isLyrical": True,
-        "beatFrames": rhythm_info.get("beat_frames", [])
-    }
+
+    if profile_key == "swiss_clean":
+        spec = direct_creative_spec(
+            words=lyrics.get("words", []),
+            fps=30,
+            duration_sec=lyrics.get("duration", 30.0)
+        )
+        props = {
+            "creativeSpec": spec.to_dict(),
+            "audioSrc": audio_path,
+            "durationInFrames": duration_frames,
+            "profile": profile_key
+        }
+        caption_extra = f"✦ سبک: تایپوگرافی سوئیسی (Glitch-Decode)\n✦ ایده ساختاری: {spec.design_system.concept}"
+    else:
+        # Direct kinetic scenes synced to musical beat grid
+        scenes = direct_music_scenes(
+            lyric_words=lyrics.get("words", []),
+            full_lyrics=lyrics.get("text", ""),
+            duration=lyrics.get("duration", 30.0),
+            rhythm_info=rhythm_info
+        )
+        props = {
+            "scenes": scenes,
+            "words": lyrics.get("words", []),
+            "text": lyrics.get("text", ""),
+            "audioSrc": audio_path,
+            "durationInFrames": duration_frames,
+            "profile": profile_key,
+            "isLyrical": True,
+            "beatFrames": rhythm_info.get("beat_frames", [])
+        }
+        caption_extra = f"⚡ هماهنگ‌شده با ضرب‌آهنگ {rhythm_info.get('bpm')} BPM\n✦ پرده‌های روایی: {len(scenes)} پرده ریتمیک"
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=180)) as resp:
-                if resp.status != 200:
-                    err = await resp.text()
-                    await callback.message.answer(f"❌ خطا در رندر: {err}")
-                    return
-                render_result = await resp.json()
+        async with RENDER_SEMAPHORE:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        await callback.message.answer(f"❌ خطا در رندر: {err}")
+                        return
+                    render_result = await resp.json()
 
         video_path = render_result["path"]
         video_file = FSInputFile(video_path)

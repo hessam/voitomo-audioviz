@@ -12,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 import sys
 sys.path.insert(0, "/root/workspace")
 from bot.services.transcriber import transcribe
-from bot.services.director import direct_scenes_with_llm
+from bot.services.director import direct_scenes_with_llm, direct_creative_spec
 from bot.services.alignment import realign_transcript
 from bot.services.normalizer import normalize_persian_asr
 from bot.services.audit import WorkflowAudit, LOGS_DIR
@@ -20,9 +20,10 @@ from bot.services.audit import WorkflowAudit, LOGS_DIR
 router = Router()
 
 RENDER_URL = "http://localhost:4000/render"
+RENDER_SEMAPHORE = asyncio.Semaphore(1)
 
 PROFILES = {
-    "swiss_clean": "✦ Swiss Clean",
+    "swiss_clean": "✦ Swiss Generative (Glitch-Decode)",
     "dark_neon": "⚡ Dark Neon",
     "tiktok_pop": "🎬 TikTok Pop"
 }
@@ -223,34 +224,49 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
         ogg_path = tmp.name
     await bot.download_file(file.file_path, destination=ogg_path)
 
-    # Generate directed visual scenes via LLM Director with full audit tracking
-    scenes = direct_scenes_with_llm(
-        words=transcript["words"],
-        full_text=transcript["text"],
-        duration=transcript["duration"],
-        audit=audit
-    )
-
     # Frame-accurate duration strictly matching audio duration
     duration_frames = max(1, round(transcript["duration"] * 30))
-    props = {
-        "scenes": scenes,
-        "words": transcript["words"],
-        "text": transcript["text"],
-        "audioSrc": ogg_path,
-        "durationInFrames": duration_frames,
-        "profile": profile_key
-    }
+
+    if profile_key == "swiss_clean":
+        spec = direct_creative_spec(
+            words=transcript["words"],
+            fps=30,
+            duration_sec=transcript["duration"],
+            audit=audit
+        )
+        props = {
+            "creativeSpec": spec.to_dict(),
+            "audioSrc": ogg_path,
+            "durationInFrames": duration_frames,
+            "profile": profile_key
+        }
+    else:
+        # Legacy template rendering for dark_neon / tiktok_pop
+        scenes = direct_scenes_with_llm(
+            words=transcript["words"],
+            full_text=transcript["text"],
+            duration=transcript["duration"],
+            audit=audit
+        )
+        props = {
+            "scenes": scenes,
+            "words": transcript["words"],
+            "text": transcript["text"],
+            "audioSrc": ogg_path,
+            "durationInFrames": duration_frames,
+            "profile": profile_key
+        }
 
     try:
         render_start = time.time()
-        async with aiohttp.ClientSession() as session:
-            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                if resp.status != 200:
-                    err = await resp.text()
-                    await callback.message.answer(f"❌ خطا در رندر: {err}")
-                    return
-                render_result = await resp.json()
+        async with RENDER_SEMAPHORE:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        await callback.message.answer(f"❌ خطا در رندر: {err}")
+                        return
+                    render_result = await resp.json()
         
         render_time = time.time() - render_start
         video_path = render_result["path"]

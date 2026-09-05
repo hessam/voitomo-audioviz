@@ -84,6 +84,7 @@ app.post("/render", async (req, res) => {
           creativeSpec,
           audioSrc: resolvedAudioSrc,
           durationInFrames: durationInFrames || creativeSpec.meta?.total_frames || 300,
+          words: words || [],
         }
       : {
           scenes: scenes || [],

@@ -236,6 +236,7 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
         )
         props = {
             "creativeSpec": spec.to_dict(),
+            "words": transcript["words"],
             "audioSrc": ogg_path,
             "durationInFrames": duration_frames,
             "profile": profile_key

@@ -18,6 +18,9 @@ export interface HeroFocusProps {
   };
   startFrame: number;
   endFrame: number;
+  currentTime?: number;
+  words?: Array<{ word: string; start: number; end: number }>;
+  isExiting?: boolean;
 }
 
 export const HeroFocus: React.FC<HeroFocusProps> = ({
@@ -26,30 +29,98 @@ export const HeroFocus: React.FC<HeroFocusProps> = ({
   designSystem,
   startFrame,
   endFrame,
+  currentTime = 0,
+  words = [],
+  isExiting = false,
 }) => {
   const frame = useCurrentFrame();
   const sceneFrame = Math.max(0, frame - startFrame);
   const totalSceneFrames = Math.max(1, endFrame - startFrame);
 
-  // Reveal takes 40% of scene duration, clamped between 8 and 24 frames
-  const revealDuration = Math.min(24, Math.max(8, Math.round(totalSceneFrames * 0.4)));
-  const progress = interpolate(sceneFrame, [0, revealDuration], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  // Reveal takes first 20 frames
+  const revealDuration = Math.min(20, Math.max(10, Math.round(totalSceneFrames * 0.25)));
+  const progress = isExiting
+    ? interpolate(sceneFrame, [totalSceneFrames - 15, totalSceneFrames], [1, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
+    : interpolate(sceneFrame, [0, revealDuration], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
 
-  const mainText = content.map((c) => c.text).join(" ") || " ";
   const fontFamily = designSystem.type_scale.family || "Vazirmatn, sans-serif";
   const fgColor = designSystem.palette.fg;
   const accentColor = designSystem.palette.accent;
+  const mutedColor = designSystem.palette.muted;
   const alignment = designSystem.grid.alignment || "left";
   const margin = designSystem.grid.margin || 80;
 
-  // Responsive font size calculation based on text length to prevent overflow
-  const charCount = mainText.length;
-  const baseFontSize = charCount <= 12 ? 96 : charCount <= 24 ? 76 : 56;
+  // Split content into Eyebrow (lead) and Hero Title (punch)
+  const hasEyebrow = content.length >= 2;
+  const eyebrowText = hasEyebrow ? content[0].text : "";
+  const heroLines = hasEyebrow ? content.slice(1) : content;
+  const heroText = heroLines.map((c) => c.text).join(" ") || " ";
 
-  const isRtl = /[\u0600-\u06FF]/.test(mainText);
+  const isRtl = /[\u0600-\u06FF]/.test(heroText + eyebrowText);
+
+  // Dynamic font size: keep it massive for true Swiss impact
+  const heroLength = heroText.length;
+  const heroFontSize = heroLength <= 18 ? 88 : heroLength <= 36 ? 74 : heroLength <= 60 ? 62 : 52;
+
+  // Helper to render text with live audio word-level illumination
+  const renderInteractiveWords = (fullText: string, defaultColor: string, baseWeight: string | number) => {
+    const tokens = fullText.split(/\s+/).filter(Boolean);
+    if (!words || words.length === 0 || tokens.length === 0) {
+      return <span>{fullText}</span>;
+    }
+
+    return (
+      <span>
+        {tokens.map((token, i) => {
+          // Clean punctuation for matching
+          const cleanToken = token.replace(/[.,?!،؟]/g, "").trim();
+          const match = words.find((w) => {
+            const cleanW = w.word.replace(/[.,?!،؟]/g, "").trim();
+            return cleanW === cleanToken && currentTime >= w.start - 0.2 && currentTime <= w.end + 0.6;
+          });
+
+          const isCurrent = match && currentTime >= match.start && currentTime <= match.end;
+          const isPast = match && currentTime > match.end;
+
+          let tokenColor = defaultColor;
+          let opacity = 0.55;
+          let textShadow = "none";
+
+          if (isCurrent) {
+            tokenColor = accentColor;
+            opacity = 1.0;
+            textShadow = `0 0 20px ${accentColor}88`;
+          } else if (isPast) {
+            tokenColor = defaultColor;
+            opacity = 1.0;
+          }
+
+          return (
+            <span
+              key={i}
+              style={{
+                color: tokenColor,
+                opacity,
+                textShadow,
+                transition: "color 0.15s ease, opacity 0.15s ease",
+                marginRight: isRtl ? "0" : "0.25em",
+                marginLeft: isRtl ? "0.25em" : "0",
+                display: "inline-block",
+              }}
+            >
+              {token}
+            </span>
+          );
+        })}
+      </span>
+    );
+  };
 
   return (
     <div
@@ -63,30 +134,62 @@ export const HeroFocus: React.FC<HeroFocusProps> = ({
         padding: `${margin}px`,
         boxSizing: "border-box",
         direction: isRtl ? "rtl" : "ltr",
+        gap: "20px",
       }}
     >
+      {/* Eyebrow / Context Lead */}
+      {hasEyebrow && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            fontFamily,
+            fontSize: 32,
+            fontWeight: 500,
+            color: mutedColor,
+            letterSpacing: "-0.01em",
+            opacity: Math.min(1, progress * 1.5),
+          }}
+        >
+          <span
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              backgroundColor: accentColor,
+              display: "inline-block",
+            }}
+          />
+          {eyebrowText}
+        </div>
+      )}
+
+      {/* Hero Massive Punch */}
       {reveal.primitive === "block_wipe" ? (
         <BlockWipe
-          text={mainText}
+          text={heroText}
           progress={progress}
           color={fgColor}
           accentColor={accentColor}
           fontFamily={fontFamily}
           fontWeight={900}
-          fontSize={baseFontSize}
+          fontSize={heroFontSize}
         />
       ) : (
         <GlitchDecode
-          text={mainText}
+          text={heroText}
           progress={progress}
           channelOffsetPx={reveal.channel_offset_px ?? 6}
           color={fgColor}
           accentColor={accentColor}
           fontFamily={fontFamily}
           fontWeight={900}
-          fontSize={baseFontSize}
-          direction={reveal.direction}
-        />
+          fontSize={heroFontSize}
+          direction={isExiting ? "reverse" : reveal.direction}
+        >
+          {renderInteractiveWords(heroText, fgColor, 900)}
+        </GlitchDecode>
       )}
     </div>
   );

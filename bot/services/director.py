@@ -434,3 +434,259 @@ def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: in
     if audit:
         audit.record_director(prompt, "", fb_scenes, LLM_MODEL, time.time() - t0, was_fallback=True, fallback_reason="LLM response did not meet schema constraints")
     return fb_scenes
+
+
+def fallback_procedural_creative_spec(words: List[Dict], fps: int, total_frames: int, total_sec: float) -> CreativeSpec:
+    """
+    Deterministic procedural fallback for CreativeSpec when LLM API is unavailable.
+    Zero hardcoded text: derives all copy, scenes, and weights directly from input words.
+    """
+    from contracts.creative_spec import (
+        CreativeSpec, DesignSystem, Palette, TypeScale, Grid, MotionSignature, RevealConfig, Scene, SceneContent
+    )
+    from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop
+
+    full_text = " ".join(w["word"] for w in words).strip() if words else "موشن‌گرافی"
+    keywords = extract_meaningful_keywords(words)
+    lead_word = keywords[0] if keywords else (words[0]["word"] if words else "تایپوگرافی")
+
+    # Dynamic palette derivation from content text
+    char_sum = sum(ord(c) for c in full_text)
+    accents = ["#E11D48", "#2563EB", "#059669", "#D97706", "#7C3AED", "#0891B2"]
+    accent_color = accents[char_sum % len(accents)]
+    bg_color, fg_color = enforce_wcag_contrast("#090A0F", "#F8FAFC")
+
+    # Detect language script
+    is_persian = any('\u0600' <= c <= '\u06FF' for c in full_text)
+    font_family = "Vazirmatn" if is_persian else "Helvetica Neue"
+
+    design_system = DesignSystem(
+        concept=sanitize_anti_slop(f"Structural typographic emphasis on: {lead_word}"),
+        palette=Palette(bg=bg_color, fg=fg_color, accent=accent_color, muted="#64748B"),
+        type_scale=TypeScale(family=font_family, weights=["300", "500", "700", "900"], ratio=1.333),
+        grid=Grid(alignment="left", margin=80, columns=12),
+        motion_signature=MotionSignature(chunking="phrase", stagger_frames=5, reveal_direction="in_place", corruption_density=0.35)
+    )
+
+    # Segment words into narrative scenes
+    scenes: List[Scene] = []
+    num_words = len(words)
+    if num_words == 0:
+        scenes.append(Scene(
+            id="scene_hero",
+            layout="hero_focus",
+            frame_range=[0, total_frames],
+            reveal=RevealConfig(primitive="glitch_decode", target="phrase", channel_offset_px=5, stagger_frames=4),
+            content=[SceneContent(text=lead_word, weight="900", is_hero=True)]
+        ))
+    elif num_words <= 6:
+        # Short phrase: Scene 1 Hero focus, Scene 2 Specimen ladder
+        mid_frame = max(int(total_frames * 0.45), 36)
+        scenes.append(Scene(
+            id="scene_01",
+            layout="hero_focus",
+            frame_range=[0, mid_frame],
+            reveal=RevealConfig(primitive="glitch_decode", target="word", channel_offset_px=5, stagger_frames=4),
+            content=[SceneContent(text=full_text, weight="900", is_hero=True)]
+        ))
+        scenes.append(Scene(
+            id="scene_02",
+            layout="specimen_ladder",
+            frame_range=[mid_frame, total_frames],
+            reveal=RevealConfig(primitive="glitch_decode", target="phrase", channel_offset_px=4, stagger_frames=6),
+            content=[
+                SceneContent(text=lead_word, weight="300"),
+                SceneContent(text=lead_word, weight="500"),
+                SceneContent(text=lead_word, weight="700"),
+                SceneContent(text=lead_word, weight="900", is_hero=True)
+            ]
+        ))
+    else:
+        # Multi-word: Scene 1 Hero, Scene 2 Specimen Ladder, Scene 3 Paragraph Stack
+        s1_end = int(total_frames * 0.35)
+        s2_end = int(total_frames * 0.70)
+        chunk_size = max(1, num_words // 3)
+        chunk1 = " ".join(w["word"] for w in words[:chunk_size])
+        chunk3_words = [w["word"] for w in words[chunk_size:]]
+
+        scenes.append(Scene(
+            id="scene_hero",
+            layout="hero_focus",
+            frame_range=[0, s1_end],
+            reveal=RevealConfig(primitive="glitch_decode", target="word", channel_offset_px=5, stagger_frames=4),
+            content=[SceneContent(text=chunk1, weight="900", is_hero=True)]
+        ))
+        scenes.append(Scene(
+            id="scene_ladder",
+            layout="specimen_ladder",
+            frame_range=[s1_end, s2_end],
+            reveal=RevealConfig(primitive="glitch_decode", target="phrase", channel_offset_px=4, stagger_frames=5),
+            content=[
+                SceneContent(text=lead_word, weight="300"),
+                SceneContent(text=lead_word, weight="500"),
+                SceneContent(text=lead_word, weight="700"),
+                SceneContent(text=lead_word, weight="900", is_hero=True)
+            ]
+        ))
+        scenes.append(Scene(
+            id="scene_paragraph",
+            layout="paragraph_stack",
+            frame_range=[s2_end, total_frames],
+            reveal=RevealConfig(primitive="block_wipe", target="phrase", channel_offset_px=0, stagger_frames=6),
+            content=[SceneContent(text=" ".join(chunk3_words), weight="500")]
+        ))
+
+    return CreativeSpec(
+        meta={"duration": total_sec, "fps": fps, "total_frames": total_frames, "width": 1080, "height": 1080},
+        design_system=design_system,
+        scenes=scenes
+    )
+
+
+def direct_creative_spec(words: List[Dict], fps: int = 30, duration_sec: float = 0.0, audit: Any = None) -> CreativeSpec:
+    """
+    LLM Art Director generating a bespoke CreativeSpec:
+    1. Invents a semantic palette and concept hook derived from the audio text.
+    2. Enforces WCAG AA contrast (CR >= 4.5:1) and anti-AI-slop copy rules.
+    3. Parameterizes 2D Swiss layouts and in-place reveals.
+    """
+    from contracts.creative_spec import (
+        CreativeSpec, DesignSystem, Palette, TypeScale, Grid, MotionSignature, RevealConfig, Scene, SceneContent
+    )
+    from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop
+
+    total_sec = duration_sec or (words[-1]["end"] if words else 5.0)
+    total_frames = max(int(total_sec * fps), 30)
+    full_text = " ".join(w["word"] for w in words).strip() if words else ""
+
+    if not words or not OPENROUTER_API_KEY:
+        return fallback_procedural_creative_spec(words, fps, total_frames, total_sec)
+
+    t0 = time.time()
+    system_prompt = (
+        "You are an elite Swiss Typography Art Director (Pentagram / Josef Müller-Brockmann disciple).\n"
+        "Your role: Invent a bespoke Generative Design System and 2D Swiss Motion Plan for the provided audio transcript.\n\n"
+        "DESIGN RULES:\n"
+        "1. NO spring/bounce physics, NO 3D camera rotations, NO floating particles. Strictly 2D Swiss layout.\n"
+        "2. IN-PLACE REVEALS ONLY: 'glitch_decode' (SVG chromatic noise clearing) or 'block_wipe' (geometric mask uncover).\n"
+        "3. LAYOUTS: Choose from 'hero_focus', 'specimen_ladder' (repeated weight stack: 300 to 900), 'paragraph_stack', 'caption_panel'.\n"
+        "4. PALETTE: Invent a bespoke, high-contrast 4-color palette matching the emotional mood (never default grey).\n"
+        "5. CONTENT GROUNDING: Every piece of text MUST come directly from the transcript tokens. Zero hallucination.\n"
+        "6. Output ONLY valid pure JSON conforming to the schema below. No markdown fences, no explanations.\n\n"
+        "JSON SCHEMA:\n"
+        "{\n"
+        '  "concept": "one-line design metaphor for this specific text",\n'
+        '  "palette": {"bg": "#RRGGBB", "fg": "#RRGGBB", "accent": "#RRGGBB", "muted": "#RRGGBB"},\n'
+        '  "type_scale": {"family": "Vazirmatn", "weights": ["300", "500", "700", "900"], "ratio": 1.333},\n'
+        '  "grid": {"alignment": "left", "margin": 80, "columns": 12},\n'
+        '  "motion_signature": {"chunking": "phrase", "stagger_frames": 5, "reveal_direction": "in_place", "corruption_density": 0.35},\n'
+        '  "scenes": [\n'
+        "    {\n"
+        '      "id": "scene_01",\n'
+        '      "layout": "hero_focus | specimen_ladder | paragraph_stack | caption_panel",\n'
+        '      "start_frame": 0,\n'
+        '      "end_frame": 120,\n'
+        '      "reveal": {"primitive": "glitch_decode | block_wipe", "target": "phrase | word", "channel_offset_px": 5, "stagger_frames": 4, "direction": "forward"},\n'
+        '      "content": [{"text": "...", "weight": "900", "is_hero": true}]\n'
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
+
+    try:
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Audio Transcript: \"{full_text}\"\nDuration: {total_sec:.2f}s ({total_frames} frames @ {fps}fps)"}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 2048
+            },
+            timeout=20
+        )
+        if resp.status_code == 200:
+            content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if content.startswith("```"):
+                content = content.strip("`")
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+
+            parsed = json.loads(content)
+            # Enforce WCAG AA contrast on palette
+            pal_raw = parsed.get("palette", {})
+            bg = pal_raw.get("bg", "#090A0F")
+            fg = pal_raw.get("fg", "#F8FAFC")
+            clean_bg, clean_fg = enforce_wcag_contrast(bg, fg)
+            accent = pal_raw.get("accent", "#E11D48")
+            muted = pal_raw.get("muted", "#64748B")
+
+            clean_palette = Palette(bg=clean_bg, fg=clean_fg, accent=accent, muted=muted)
+            clean_concept = sanitize_anti_slop(parsed.get("concept", "Bespoke Typographic Narrative"))
+
+            ds = DesignSystem(
+                concept=clean_concept,
+                palette=clean_palette,
+                type_scale=TypeScale(**parsed.get("type_scale", {"family": "Vazirmatn", "weights": ["300", "500", "700", "900"], "ratio": 1.333})),
+                grid=Grid(**parsed.get("grid", {"alignment": "left", "margin": 80, "columns": 12})),
+                motion_signature=MotionSignature(**parsed.get("motion_signature", {"chunking": "phrase", "stagger_frames": 5, "reveal_direction": "in_place", "corruption_density": 0.35}))
+            )
+
+            raw_scenes = parsed.get("scenes", [])
+            scenes: List[Scene] = []
+            cur_start = 0
+            for idx, s in enumerate(raw_scenes):
+                end_f = int(s.get("end_frame", cur_start + total_frames // len(raw_scenes)))
+                if idx == len(raw_scenes) - 1:
+                    end_f = total_frames
+
+                rev_data = s.get("reveal", {})
+                reveal = RevealConfig(
+                    primitive=rev_data.get("primitive", "glitch_decode"),
+                    target=rev_data.get("target", "phrase"),
+                    channel_offset_px=rev_data.get("channel_offset_px", 5),
+                    stagger_frames=rev_data.get("stagger_frames", 4),
+                    direction=rev_data.get("direction", "forward")
+                )
+                items = [
+                    SceneContent(
+                        text=clean_line_typography(c.get("text", "")),
+                        weight=c.get("weight", "700"),
+                        is_hero=c.get("is_hero", False)
+                    )
+                    for c in s.get("content", [])
+                    if c.get("text")
+                ]
+                if not items:
+                    items = [SceneContent(text=full_text, weight="700")]
+
+                scenes.append(Scene(
+                    id=s.get("id", f"scene_{idx+1}"),
+                    layout=s.get("layout", "hero_focus"),
+                    frame_range=[cur_start, end_f],
+                    reveal=reveal,
+                    content=items,
+                    motion=s.get("motion", {})
+                ))
+                cur_start = end_f
+
+            if scenes:
+                scenes[0].frame_range[0] = 0
+                scenes[-1].frame_range[1] = total_frames
+                spec = CreativeSpec(
+                    meta={"duration": total_sec, "fps": fps, "total_frames": total_frames, "width": 1080, "height": 1080},
+                    design_system=ds,
+                    scenes=scenes
+                )
+                logger.info(f"✅ LLM Art Director created CreativeSpec (concept: {clean_concept}, palette: {clean_palette.bg}/{clean_palette.fg})")
+                return spec
+
+    except Exception as e:
+        logger.warning(f"LLM CreativeSpec generation failed ({e}), using procedural fallback")
+
+    return fallback_procedural_creative_spec(words, fps, total_frames, total_sec)
+

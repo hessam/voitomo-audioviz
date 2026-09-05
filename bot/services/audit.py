@@ -96,8 +96,14 @@ class WorkflowAudit:
 
             # Build narrative explanation for why this scene was constructed
             reasoning = ""
-            if st_type == "HERO_BLOCK":
-                reasoning = f"Anchor headline: Highlights core phrase '{' / '.join(lines)}' with high-contrast zero-margin stacking."
+            if st_type in ("HERO_BLOCK", "hero_focus"):
+                reasoning = f"Hero typographic anchor: Highlights key phrase '{' / '.join(lines)}' with in-place chromatic decode."
+            elif st_type == "specimen_ladder":
+                reasoning = f"Repeated emphasis ladder: Core concept '{' / '.join(lines)}' escalated across ascending font weights (300 to 900)."
+            elif st_type == "paragraph_stack":
+                reasoning = f"Architectural editorial block: Clean multi-line statement '{' / '.join(lines)}' revealed via phrase-chunked geometric mask."
+            elif st_type == "caption_panel":
+                reasoning = f"Factual metadata panel: Static small-caps architectural card anchoring supporting details."
             elif st_type == "METRIC_PUNCH":
                 reasoning = f"Quantitative milestone detected: Spoken number '{counter_to}' animated as live counter with badge '{badge or 'آمار کلیدی'}'."
             elif st_type == "BENTO_GRID":
@@ -107,6 +113,8 @@ class WorkflowAudit:
                 reasoning = f"Asymmetric continuity beat: Text pinned off-center with technical blueprint callout for '{badge or 'محور فعالیت'}'."
             elif st_type == "CALLOUT_CARD":
                 reasoning = f"Entity / team highlight: Floating badge card for '{badge or 'برند / تیم'}' with overshoot bounce."
+            else:
+                reasoning = f"Editorial layout '{st_type}' highlighting: '{' / '.join(lines)}'."
 
             scene_explanations.append({
                 "scene_index": idx + 1,

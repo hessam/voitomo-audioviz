@@ -1,7 +1,8 @@
 import React from "react";
 
 export interface GlitchDecodeProps {
-  text: string;
+  text?: string;
+  children?: React.ReactNode;
   progress: number; // 0 (fully corrupted) -> 1 (fully clean)
   channelOffsetPx?: number;
   color: string;
@@ -14,7 +15,8 @@ export interface GlitchDecodeProps {
 }
 
 export const GlitchDecode: React.FC<GlitchDecodeProps> = ({
-  text,
+  text = "",
+  children,
   progress: rawProgress,
   channelOffsetPx = 6,
   color,
@@ -30,6 +32,8 @@ export const GlitchDecode: React.FC<GlitchDecodeProps> = ({
   // If direction is reverse, progress 0 = clean, progress 1 = corrupted
   const effectiveProgress = direction === "reverse" ? 1 - cleanProgress : cleanProgress;
 
+  const contentToRender = children !== undefined ? children : text;
+
   // When fully clean (progress = 1), render standard crisp typography with zero overhead
   if (effectiveProgress >= 0.99) {
     return (
@@ -44,7 +48,7 @@ export const GlitchDecode: React.FC<GlitchDecodeProps> = ({
           ...style,
         }}
       >
-        {text}
+        {contentToRender}
       </div>
     );
   }
@@ -98,7 +102,7 @@ export const GlitchDecode: React.FC<GlitchDecodeProps> = ({
               userSelect: "none",
             }}
           >
-            {text}
+            {contentToRender}
           </span>
           <span
             aria-hidden="true"
@@ -114,14 +118,14 @@ export const GlitchDecode: React.FC<GlitchDecodeProps> = ({
               userSelect: "none",
             }}
           >
-            {text}
+            {contentToRender}
           </span>
         </>
       )}
 
       {/* Base Primary Glyphs */}
       <span style={{ position: "relative", filter: currentOffset > 1 ? `url(#${filterId})` : "none" }}>
-        {text}
+        {contentToRender}
       </span>
     </div>
   );

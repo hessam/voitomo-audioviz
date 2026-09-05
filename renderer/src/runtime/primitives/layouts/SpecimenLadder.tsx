@@ -18,6 +18,9 @@ export interface SpecimenLadderProps {
   };
   startFrame: number;
   endFrame: number;
+  currentTime?: number;
+  words?: Array<{ word: string; start: number; end: number }>;
+  isExiting?: boolean;
 }
 
 export const SpecimenLadder: React.FC<SpecimenLadderProps> = ({
@@ -26,43 +29,40 @@ export const SpecimenLadder: React.FC<SpecimenLadderProps> = ({
   designSystem,
   startFrame,
   endFrame,
+  currentTime = 0,
+  words = [],
+  isExiting = false,
 }) => {
   const frame = useCurrentFrame();
   const sceneFrame = Math.max(0, frame - startFrame);
+  const totalSceneFrames = Math.max(1, endFrame - startFrame);
 
   const fontFamily = designSystem.type_scale.family || "Vazirmatn, sans-serif";
-  const defaultWeights = designSystem.type_scale.weights || ["300", "500", "700", "900"];
+  const defaultWeights = ["300", "500", "700", "900"];
   const fgColor = designSystem.palette.fg;
   const accentColor = designSystem.palette.accent;
   const mutedColor = designSystem.palette.muted;
   const margin = designSystem.grid.margin || 80;
   const alignment = designSystem.grid.alignment || "left";
 
-  // Build rows dynamically
-  let rows: Array<{ text: string; weight: string; isHero: boolean }> = [];
-  if (content.length > 1) {
-    rows = content.map((c, i) => ({
-      text: c.text,
-      weight: c.weight || defaultWeights[i % defaultWeights.length],
-      isHero: !!c.is_hero,
-    }));
-  } else if (content.length === 1) {
-    // Single emphasis keyword repeated across escalating weights
-    const text = content[0].text;
-    rows = defaultWeights.map((w, i) => ({
-      text,
-      weight: w,
-      isHero: i === defaultWeights.length - 1,
-    }));
-  }
+  // Pick core focus phrase
+  const focusText = content.length > 0 ? content[0].text : "SWISS SPECIMEN";
+  const supportingText = content.length > 1 ? content.slice(1).map((c) => c.text).join(" ") : "";
+
+  // 4 rows escalating in weight
+  const ladderRows = [
+    { text: focusText, weight: "300", isHero: false, color: mutedColor },
+    { text: focusText, weight: "500", isHero: false, color: fgColor },
+    { text: focusText, weight: "700", isHero: false, color: fgColor },
+    { text: focusText, weight: "900", isHero: true, color: accentColor },
+  ];
 
   const stagger = reveal.stagger_frames ?? 6;
-  const rowDuration = 14;
-  const isRtl = rows.some((r) => /[\u0600-\u06FF]/.test(r.text));
+  const rowDuration = 16;
+  const isRtl = /[\u0600-\u06FF]/.test(focusText);
 
-  // Determine font size to fit vertical ladder comfortably
-  const rowCount = Math.max(1, rows.length);
-  const fontSize = rowCount >= 5 ? 54 : rowCount >= 4 ? 64 : 76;
+  // Font size calibrated for punchy specimen display
+  const fontSize = focusText.length <= 15 ? 74 : focusText.length <= 30 ? 58 : 46;
 
   return (
     <div
@@ -76,46 +76,80 @@ export const SpecimenLadder: React.FC<SpecimenLadderProps> = ({
         padding: `${margin}px`,
         boxSizing: "border-box",
         direction: isRtl ? "rtl" : "ltr",
-        gap: `${Math.max(8, 28 - rowCount * 3)}px`,
+        gap: "10px",
       }}
     >
-      {rows.map((row, idx) => {
-        const rowStart = idx * stagger;
-        const progress = interpolate(sceneFrame, [rowStart, rowStart + rowDuration], [0, 1], {
-          extrapolateLeft: "clamp",
-          extrapolateRight: "clamp",
-        });
+      {/* Specimen Category Eyebrow */}
+      <div
+        style={{
+          fontFamily,
+          fontSize: 24,
+          fontWeight: 700,
+          color: mutedColor,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          marginBottom: "12px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        <span style={{ color: accentColor }}>//</span>
+        WEIGHT SPECIMEN LADDER [300 - 900]
+      </div>
 
-        const rowColor = row.isHero ? fgColor : idx === 0 ? mutedColor : fgColor;
+      {/* Escalating Weight Rows */}
+      {ladderRows.map((row, idx) => {
+        const rowStart = idx * stagger;
+        const progress = isExiting
+          ? interpolate(sceneFrame, [totalSceneFrames - 15, totalSceneFrames], [1, 0], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            })
+          : interpolate(sceneFrame, [rowStart, rowStart + rowDuration], [0, 1], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            });
 
         return (
-          <div key={idx} style={{ width: "100%" }}>
-            {reveal.primitive === "block_wipe" ? (
-              <BlockWipe
-                text={row.text}
-                progress={progress}
-                color={rowColor}
-                accentColor={accentColor}
-                fontFamily={fontFamily}
-                fontWeight={row.weight}
-                fontSize={fontSize}
-              />
-            ) : (
-              <GlitchDecode
-                text={row.text}
-                progress={progress}
-                channelOffsetPx={reveal.channel_offset_px ?? 5}
-                color={rowColor}
-                accentColor={accentColor}
-                fontFamily={fontFamily}
-                fontWeight={row.weight}
-                fontSize={fontSize}
-                direction={reveal.direction}
-              />
-            )}
+          <div key={idx} style={{ width: "100%", lineHeight: 1.05 }}>
+            <GlitchDecode
+              text={row.text}
+              progress={progress}
+              channelOffsetPx={reveal.channel_offset_px ?? 5}
+              color={row.color}
+              accentColor={accentColor}
+              fontFamily={fontFamily}
+              fontWeight={row.weight}
+              fontSize={fontSize}
+              direction={isExiting ? "reverse" : reveal.direction}
+            />
           </div>
         );
       })}
+
+      {/* Supporting Editorial Caption Block */}
+      {supportingText && (
+        <div
+          style={{
+            marginTop: "24px",
+            paddingTop: "16px",
+            borderTop: `1px solid ${mutedColor}33`,
+            width: "100%",
+            fontFamily,
+            fontSize: 28,
+            fontWeight: 500,
+            color: mutedColor,
+            lineHeight: 1.4,
+            opacity: interpolate(sceneFrame, [4 * stagger, 4 * stagger + 15], [0, 1], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            }),
+          }}
+        >
+          {supportingText}
+        </div>
+      )}
     </div>
   );
 };

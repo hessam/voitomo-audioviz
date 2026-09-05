@@ -262,7 +262,7 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
         render_start = time.time()
         async with RENDER_SEMAPHORE:
             async with aiohttp.ClientSession() as session:
-                async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=360)) as resp:
                     if resp.status != 200:
                         err = await resp.text()
                         await callback.message.answer(f"❌ خطا در رندر: {err}")
@@ -368,7 +368,7 @@ async def handle_word_edit(message: Message, state: FSMContext):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=360)) as resp:
                 render_result = await resp.json()
 
         video_path = render_result["path"]

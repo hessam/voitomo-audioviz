@@ -51,7 +51,7 @@ async def handle_edit(message: Message, state: FSMContext):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=360)) as resp:
                 if resp.status != 200:
                     err = await resp.text()
                     await message.answer(f"❌ خطا در رندر: {err}")

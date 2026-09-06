@@ -226,182 +226,23 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
   const cameraDynamic = activeScene?.camera_dynamic || "push";
   const cameraTransform = getCameraTransform(cameraDynamic, sceneProgress);
 
-  // Render Scene-Shot-Layer Graph IR
-  const renderGraphLayers = () => {
-    if (!activeScene) return null;
+  // Accumulating Multi-Line Tape Strips
+  // Stacks 1 to 3 phrases sequentially before clearing, matching Canva/Cavalry kinetic flow
+  const cycleIdx = activeSceneIdx % 3; // 0, 1, 2
+  const showBento = (cycleIdx === 2) || (activeSceneIdx === scenes.length - 1) || activeScene?.layout === "bento_grid";
 
-    const layers = activeScene.layers || [];
-    const layout = activeScene.layout || "hero_focus";
-    const sceneBadge = clampBadge(activeScene.badge || layers.find((l) => l.type === "kinetic_badge")?.text);
-    const heroLayer = layers.find((l) => l.is_hero || l.weight === "900") || layers[0];
-    const nonHeroLayers = layers.filter((l) => l !== heroLayer && l.type !== "kinetic_badge");
-    const primaryVerb = heroLayer?.action_verb || creativeSpec?.creative_dna?.transformation_verbs?.[0] || "reveal";
-    const heroVerbStyle = getVerbMotionStyle(primaryVerb, sceneProgress, springVal, ds.palette.accent, ds.palette.fg);
-
-    // 1. SPECIMEN LADDER / STAGGERED LAYOUT
-    if (layout === "specimen_ladder" && nonHeroLayers.length > 0) {
-      return (
-        <div
-          style={{
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "10px",
-            direction: "rtl",
-            ...heroVerbStyle,
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "4px 14px",
-              backgroundColor: "#000000",
-              color: "#FFFFFF",
-              boxShadow: "3px 3px 0px 0px #000000",
-              fontSize: "15px",
-              fontWeight: 800,
-              fontFamily,
-            }}
-          >
-            <span>✦</span>
-            <span>{sceneBadge}</span>
-          </div>
-          {heroLayer && (
-            <TapeStrip
-              text={heroLayer.text || ""}
-              isBlack={false}
-              fontSize={heroLayer.text && heroLayer.text.length > 25 ? 44 : 54}
-              fontFamily={fontFamily}
-              startFrame={startFrame}
-            />
-          )}
-          {nonHeroLayers[0] && (
-            <TapeStrip
-              text={nonHeroLayers[0].text || ""}
-              isBlack={true}
-              fontSize={26}
-              fontFamily={fontFamily}
-              startFrame={startFrame + 4}
-            />
-          )}
-        </div>
-      );
+  const stackedScenes: Array<{ scene: (typeof scenes)[0]; isCurrent: boolean }> = [];
+  for (let offset = cycleIdx; offset >= 0; offset--) {
+    const sIdx = activeSceneIdx - offset;
+    if (sIdx >= 0 && scenes[sIdx]) {
+      stackedScenes.push({ scene: scenes[sIdx], isCurrent: offset === 0 });
     }
+  }
 
-    // 2. METRIC PUNCH LAYOUT
-    if (layout === "metric_punch") {
-      return (
-        <div
-          style={{
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "12px",
-            direction: "rtl",
-            ...heroVerbStyle,
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "4px 16px",
-              backgroundColor: ds.palette.accent,
-              color: "#000000",
-              fontWeight: 900,
-              fontSize: "16px",
-              boxShadow: "4px 4px 0px 0px #000000",
-            }}
-          >
-            <span>★</span>
-            <span>{sceneBadge}</span>
-          </div>
-          {heroLayer && (
-            <TapeStrip
-              text={heroLayer.text || ""}
-              isBlack={false}
-              fontSize={heroLayer.text && heroLayer.text.length > 20 ? 52 : 64}
-              fontFamily={fontFamily}
-              startFrame={startFrame}
-            />
-          )}
-        </div>
-      );
-    }
-
-    // 3. DEFAULT KINETIC TAPE-STRIP STREAM (Cavalry / Canva benchmark)
-    return (
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "12px",
-          direction: "rtl",
-          ...heroVerbStyle,
-        }}
-      >
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "4px 16px",
-            backgroundColor: "#000000",
-            color: "#FFFFFF",
-            boxShadow: "4px 4px 0px 0px #000000",
-            fontSize: "16px",
-            fontWeight: 800,
-            fontFamily,
-          }}
-        >
-          <span>✦</span>
-          <span>{sceneBadge}</span>
-        </div>
-
-        {heroLayer && (
-          <TapeStrip
-            text={heroLayer.text || ""}
-            isBlack={false}
-            fontSize={heroLayer.text && heroLayer.text.length > 25 ? 46 : 58}
-            fontFamily={fontFamily}
-            startFrame={startFrame}
-          />
-        )}
-
-        {nonHeroLayers[0] && (
-          <TapeStrip
-            text={nonHeroLayers[0].text || ""}
-            isBlack={true}
-            fontSize={28}
-            fontFamily={fontFamily}
-            startFrame={startFrame + 4}
-          />
-        )}
-      </div>
-    );
-  };
-
-  // Fallback layout renderer for standard scenes
   const renderLayout = () => {
     if (!activeScene) return null;
 
-    // Prefer Graph IR layers
-    if (activeScene.layers && activeScene.layers.length > 0) {
-      return renderGraphLayers();
-    }
-
-    const heroContent = activeScene.content?.find(c => c.is_hero || c.weight === "900") || activeScene.content?.[0];
-    const subContent = activeScene.content?.filter(c => c !== heroContent)?.[0];
-    const heroText = heroContent?.text || "";
-    const subText = subContent?.text || "";
-    const sceneBadge = clampBadge(activeScene.badge);
+    const currentBadge = clampBadge(activeScene.badge || activeScene.layers?.find(l => l.type === "kinetic_badge")?.text);
 
     return (
       <div
@@ -410,10 +251,11 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: "12px",
+          gap: "8px",
           direction: "rtl",
         }}
       >
+        {/* Kinetic Badge */}
         <div
           style={{
             display: "inline-flex",
@@ -423,34 +265,35 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
             backgroundColor: "#000000",
             color: "#FFFFFF",
             boxShadow: "4px 4px 0px 0px #000000",
-            fontSize: "16px",
+            fontSize: "15px",
             fontWeight: 800,
             fontFamily,
+            marginBottom: "6px",
           }}
         >
           <span>✦</span>
-          <span>{sceneBadge}</span>
+          <span>{currentBadge}</span>
         </div>
 
-        {heroText && (
-          <TapeStrip
-            text={heroText}
-            isBlack={false}
-            fontSize={heroText.length > 25 ? 46 : 58}
-            fontFamily={fontFamily}
-            startFrame={startFrame}
-          />
-        )}
+        {/* Stacked Chunky Tape Strips */}
+        {stackedScenes.map(({ scene, isCurrent }) => {
+          const sText = scene.layers?.find(l => l.is_hero || l.weight === "900")?.text || scene.content?.find(c => c.is_hero)?.text || scene.content?.[0]?.text || "";
+          if (!sText) return null;
+          const sStart = scene.frame_range[0];
+          const baseSize = stackedScenes.length > 2 ? 42 : (stackedScenes.length === 2 ? 50 : 58);
+          const fontSize = sText.length > 25 ? baseSize - 6 : baseSize;
 
-        {subText && (
-          <TapeStrip
-            text={subText}
-            isBlack={true}
-            fontSize={28}
-            fontFamily={fontFamily}
-            startFrame={startFrame + 4}
-          />
-        )}
+          return (
+            <TapeStrip
+              key={scene.id}
+              text={sText}
+              isBlack={!isCurrent}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
+              startFrame={sStart}
+            />
+          );
+        })}
       </div>
     );
   };
@@ -476,19 +319,19 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           bottom: `${margin - 24}px`,
           left: `${margin - 24}px`,
           right: `${margin - 24}px`,
-          border: `1px solid ${ds.palette.fg}14`,
+          border: `1px solid ${ds.palette.fg}10`,
           pointerEvents: "none",
           zIndex: 10,
         }}
       >
         {/* Sleek corner registration ticks */}
-        <span style={{ position: "absolute", top: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", top: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", bottom: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", bottom: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
+        <span style={{ position: "absolute", top: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
+        <span style={{ position: "absolute", top: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
+        <span style={{ position: "absolute", bottom: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
+        <span style={{ position: "absolute", bottom: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
       </div>
 
-      {/* Top Technical Header HUD (Without REC) */}
+      {/* Top Technical Header HUD (Silenced) */}
       <div
         style={{
           position: "absolute",
@@ -504,6 +347,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           letterSpacing: "0.06em",
           textTransform: "uppercase",
           whiteSpace: "nowrap",
+          opacity: 0.28,
           zIndex: 20,
         }}
       >
@@ -544,30 +388,33 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           transition: "transform 0.05s linear",
         }}
       >
-        {/* Kinetic Typographic Stage (Upper 45%) */}
+        {/* Kinetic Typographic Stage (Upper 46% if Bento active, centered 64% otherwise) */}
         <div
           style={{
             position: "absolute",
-            top: "70px",
+            top: showBento ? "65px" : "18%",
             left: "5%",
             right: "5%",
-            height: "45%",
+            height: showBento ? "46%" : "64%",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             alignItems: "center",
             textAlign: "center",
             zIndex: 10,
+            transition: "all 0.15s ease",
           }}
         >
           {renderLayout()}
         </div>
 
-        {/* Lower Canvas Geometric Bento Matrix (Cavalry Anchor - mounted across all scenes) */}
-        <BentoMatrix style={{ position: "absolute", inset: "54% 5% 6% 5%", zIndex: 5 }} />
+        {/* Lower Canvas Geometric Bento Matrix (Anchors every 3rd phrase & summary moments) */}
+        {showBento && (
+          <BentoMatrix style={{ position: "absolute", inset: "54% 5% 6% 5%", zIndex: 5 }} />
+        )}
       </div>
 
-      {/* Bottom Technical Footer HUD with Audio Waveform Scrubber */}
+      {/* Bottom Technical Footer HUD (Silenced) */}
       <div
         style={{
           position: "absolute",
@@ -581,6 +428,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           fontFamily: "monospace, sans-serif",
           color: ds.palette.muted,
           letterSpacing: "0.06em",
+          opacity: 0.28,
           zIndex: 20,
         }}
       >

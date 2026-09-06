@@ -13,21 +13,23 @@ from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop, h
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_LAYOUTS = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
+ALLOWED_LAYOUTS = ["kinetic_poster", "statement_stack", "split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
 
-def enforce_layout_diversity(scenes: List[Any]) -> List[Any]:
+def enforce_layout_diversity(scenes: List[Any], is_music: bool = False) -> List[Any]:
     """
     Enforces strict layout diversity rules across scenes:
-    1. No two consecutive scenes may share the same layout.
-    2. For a >= 4 scene video, mandate at least 3 distinct structural archetypes
-       ('split_viewport', 'bento_grid', 'metric_punch', 'specimen_ladder', 'hero_focus').
-    3. If multiple 'hero_focus' scenes appear in a row or layout monoculture occurs,
-       auto-mutate alternating scenes into 'split_viewport' or 'bento_grid'.
+    1. Music / Poetry: Always kinetic_poster, strictly bans bento_grid, metric_punch, split_viewport.
+    2. Educational / Voice: Guarantees alternation, prevents consecutive duplicates, ensures >= 3 archetypes.
     """
     if not scenes:
         return scenes
 
-    alternatives = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch"]
+    if is_music or any(getattr(s, "layout", None) == "kinetic_poster" for s in scenes):
+        for s in scenes:
+            s.layout = "kinetic_poster"
+        return scenes
+
+    alternatives = ["statement_stack", "split_viewport", "metric_punch", "specimen_ladder", "hero_focus"]
 
     # Pass 1: Normalize layouts and mutate consecutive duplicates
     for i in range(len(scenes)):
@@ -46,7 +48,7 @@ def enforce_layout_diversity(scenes: List[Any]) -> List[Any]:
     if len(scenes) >= 4:
         distinct = set(getattr(s, "layout", "") for s in scenes)
         if len(distinct) < 3:
-            pattern = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
+            pattern = ["statement_stack", "metric_punch", "split_viewport", "hero_focus", "specimen_ladder"]
             for i in range(len(scenes)):
                 scenes[i].layout = pattern[i % len(pattern)]
 
@@ -654,6 +656,42 @@ def synthesize_creative_dna(
     )
 
 
+def derive_phrase_layout(phrase_text: str, is_music: bool = False) -> str:
+    """
+    Branch Layout by Audio Type and Narrative Intent:
+    - Music / Poetry: ALWAYS 'kinetic_poster'
+    - Educational / Voice:
+      - Numbers / Percentages ("۱۰۰", "۲۰۰", "درصد") -> 'metric_punch'
+      - Questions ("؟", "کجا", "چرا") -> 'hero_focus'
+      - Item listing / alternatives ("چه بزرگ چه کوچک", "یا") -> 'split_viewport'
+      - Default -> 'statement_stack'
+    """
+    if is_music:
+        return "kinetic_poster"
+
+    # 1. Numbers / Percentages
+    num_markers = [
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+        "۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹",
+        "درصد", "%", "$", "تومان", "هزار", "میلیون", "میلیارد", "۱۰۰", "۲۰۰"
+    ]
+    if any(c in phrase_text for c in num_markers):
+        return "metric_punch"
+
+    # 2. Questions
+    q_markers = ["؟", "?", "کجا", "چرا", "چطور", "چگونه", "آیا", "کدام", "کی"]
+    if any(q in phrase_text for q in q_markers):
+        return "hero_focus"
+
+    # 3. Item listing / alternatives
+    list_markers = ["چه بزرگ چه کوچک", "چه بزرگ", "چه کوچک", " یا ", "تا ", "از ", " و ", "هم "]
+    if any(s in phrase_text for s in list_markers):
+        return "split_viewport"
+
+    # Default
+    return "statement_stack"
+
+
 def build_kinetic_phrase_scenes(
     words: List[Dict],
     total_frames: int,
@@ -689,28 +727,27 @@ def build_kinetic_phrase_scenes(
     # 1. Group words into 3-6 word chunks with 0.8s - 2.0s duration targets
     chunks: List[List[Dict]] = []
     current_chunk: List[Dict] = []
+    chunk_start_time = words[0].get("start", 0.0)
 
     for i, w in enumerate(words):
         current_chunk.append(w)
-        dur = current_chunk[-1].get("end", 0) - current_chunk[0].get("start", 0)
-        word_count = len(current_chunk)
+        prev_w = words[i - 1] if i > 0 else None
+        pause = (w.get("start", 0.0) - prev_w.get("end", 0.0)) if prev_w else 0.0
+        dur = w.get("end", 0.0) - chunk_start_time
+        has_punct = bool(re.search(r"[.!؟،,;]", w.get("word", "")))
 
-        has_pause = False
-        if i < len(words) - 1:
-            gap = words[i+1].get("start", 0) - w.get("end", 0)
-            if gap >= 0.20:
-                has_pause = True
+        # Break conditions: 3-5 words OR punctuation OR pause > 0.25s OR duration >= 1.4s
+        is_break = (
+            (len(current_chunk) >= 3 and (has_punct or pause >= 0.25 or dur >= 1.2))
+            or len(current_chunk) >= 5
+            or (i == len(words) - 1)
+        )
 
-        is_last_word = (i == len(words) - 1)
-
-        # Finalize phrase beat if:
-        # - natural breath/pause occurred and chunk has >= 3 words, OR
-        # - chunk reached 5-6 words, OR
-        # - duration reached >= 1.7 seconds, OR
-        # - last word reached
-        if is_last_word or (word_count >= 3 and has_pause) or word_count >= 5 or dur >= 1.7:
+        if is_break:
             chunks.append(current_chunk)
             current_chunk = []
+            if i + 1 < len(words):
+                chunk_start_time = words[i + 1].get("start", 0.0)
 
     if current_chunk:
         if chunks:
@@ -733,25 +770,35 @@ def build_kinetic_phrase_scenes(
 
     bounds[-1] = total_frames
 
-    # 3. Create SceneNodes with cycling layout archetypes and action verbs
+    # 3. Create SceneNodes branching by Audio Type and phrase intent
     scenes: List[SceneNode] = []
     camera_cycle = ["push", "pan_left", "drift", "pan_right", "static"]
     transition_cycle = ["wipe", "glitch", "wipe", "cut"]
-    layout_cycle = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
     verbs = (creative_dna.transformation_verbs if creative_dna else None) or ["compress", "accrete", "reconcile"]
+
+    # Detect if audio is Music / Poetry:
+    is_music = False
+    if creative_dna and getattr(creative_dna, "world", None) == "kinetic-poster":
+        is_music = True
+    full_transcript = " ".join(w.get("word", "") for w in words).strip() if words else ""
+    if not is_music and classify_visual_world(full_transcript) == "kinetic-poster":
+        is_music = True
 
     for idx, c in enumerate(chunks):
         f_start = bounds[idx]
         f_end = bounds[idx + 1]
-        phrase_text = " ".join(w["word"] for w in c).strip()
+        phrase_text = " ".join(w.get("word", "") for w in c).strip()
         cleaned_text = clean_line_typography(phrase_text)
 
         is_final = (idx == len(chunks) - 1)
         verb = "reconcile" if is_final else verbs[idx % len(verbs)]
 
         # Clamped badge: keyword or category tag
-        badge_candidates = [w["word"] for w in c if len(w["word"]) >= 3]
+        badge_candidates = [w.get("word", "") for w in c if len(w.get("word", "")) >= 3]
         badge_str = clamp_badge(badge_candidates[0] if badge_candidates else f"نکته {idx+1}")
+
+        # Derive layout from phrase meaning or music
+        layout = derive_phrase_layout(phrase_text, is_music=is_music)
 
         layer = LayerNode(
             id=f"l_{idx+1:02d}_hero",
@@ -766,10 +813,10 @@ def build_kinetic_phrase_scenes(
         scenes.append(SceneNode(
             id=f"phrase_{idx+1:02d}",
             frame_range=[f_start, f_end],
-            layout=layout_cycle[idx % len(layout_cycle)],
+            layout=layout,
             camera_dynamic=camera_cycle[idx % len(camera_cycle)],
             entry_transition=transition_cycle[idx % len(transition_cycle)],
-            badge=badge_str,
+            badge="" if is_music else badge_str,
             layers=[layer],
             narrative_beat="Resolution" if is_final else f"Phrase Beat {idx+1}"
         ))

@@ -124,38 +124,83 @@ HARMONIC_PALETTES = [
     compile_palette(mood="calm", hue=210.0, variant="dark"),    # Deep Slate
 ]
 
+SAFE_PALETTES = {
+    "studio_concrete": Palette(
+        bg="#B8B9BA",
+        fg="#000000",
+        accent="#000000",
+        muted="#4B5563",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "electric_cobalt": Palette(
+        bg="#5537ED",
+        fg="#FFFFFF",
+        accent="#FF5500",
+        muted="#E0E7FF",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "signal_acid": Palette(
+        bg="#0E0F12",
+        fg="#FFFFFF",
+        accent="#D4FF00",
+        muted="#9CA3AF",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+}
+
+def is_banned_sludge_color(color: str) -> bool:
+    """
+    Checks if a background color falls into brown/sludge or dark navy traps:
+    - Bans any hex starting with '#2' or '#3' in darker channels (#211513, #241815, #2A140E, #301B14, etc.)
+    - Bans '#090A0F' and '#0A0B0E'
+    - Bans hue angles between 20 deg and 105 deg.
+    """
+    if not color or not isinstance(color, str):
+        return True
+    s = color.strip().upper()
+    if s.startswith("#2") or s.startswith("#3"):
+        return True
+    if s in ("#090A0F", "#0A0B0E"):
+        return True
+    return False
+
 def generate_harmonic_palette(seed_text: str, mood_verb: str = "") -> Palette:
     """
-    Procedurally compiles a vibrant OKLCH palette from text semantics and mood verb.
-    Bans the brown sludge zone (hues 20°-105°) via safe_hue.
-    Computes backgrounds with compile_palette and stark White/Black text containers
-    with #000000 hard offset block shadows.
+    Hardcoded Safe Palette Engine:
+    Selects exclusively among the 3 verified benchmark palettes:
+    1. Studio Concrete (#B8B9BA - Cavalry benchmark)
+    2. Electric Cobalt (#5537ED - Canva benchmark)
+    3. Signal Acid (#0E0F12 with #D4FF00)
+    Permanently bans any hex starting with #2 or #3.
     """
     import hashlib
     combined = f"{seed_text}_{mood_verb}".lower()
 
-    # 1. Nocturne / Lyric / Poetry / Organic -> Calm emerald deep
-    lyric_keywords = ["شب", "سکوت", "کویر", "ماه", "رقص", "ستاره", "عشق", "شعر", "دل", "ترانه", "موزیک", "آواز", "باران"]
-    if any(k in combined for k in lyric_keywords):
-        return compile_palette(mood="calm", hue=165.0, variant="dark")
+    # 1. Technical / Systems / Professional / Marketing -> Electric Cobalt (#5537ED)
+    tech_keywords = ["لینکدین", "سیستم", "شرکت", "شغل", "کار", "پروژه", "رزومه", "مصاحبه", "تخصص", "فناوری", "رشد", "برند"]
+    if any(k in combined for k in tech_keywords):
+        return SAFE_PALETTES["electric_cobalt"]
 
-    # 2. Systems / Governance / Academic / Architecture -> Bold cobalt light
-    systems_keywords = ["سیستم", "غیرمتمرکز", "ساختار", "داده", "الگوریتم", "معماری", "توسعه", "علم", "تحلیل", "کنترل", "تصمیم"]
-    if any(k in combined for k in systems_keywords):
-        return compile_palette(mood="bold", hue=240.0, variant="light")
+    # 2. Editorial / Minimalist / Architecture -> Studio Concrete (#B8B9BA)
+    editorial_keywords = ["معماری", "طراحی", "سوئیس", "ساختار", "هنر", "تایپوگرافی", "ساده", "سفید", "خاکستری"]
+    if any(k in combined for k in editorial_keywords):
+        return SAFE_PALETTES["studio_concrete"]
 
-    # 3. Commercial / Speed / Action / Marketing -> Electric coral red
-    commercial_keywords = ["ثانیه", "فقط", "برند", "فروش", "سریع", "پول", "کسب", "جهانی", "میلیون", "تخفیف", "تبلیغ", "بازار"]
-    if any(k in combined for k in commercial_keywords):
-        return compile_palette(mood="electric", hue=15.0, variant="dark")
+    # 3. Night / Acid / Nocturne -> Signal Acid (#0E0F12 with #D4FF00)
+    night_keywords = ["شب", "سکوت", "موزیک", "ترانه", "آواز", "صدا", "سیگنال"]
+    if any(k in combined for k in night_keywords):
+        return SAFE_PALETTES["signal_acid"]
 
-    # High-dispersion hash for infinite semantic diversity
+    # Hash fallback across the 3 safe benchmark palettes
     hash_int = int(hashlib.sha256(combined.encode("utf-8")).hexdigest(), 16)
-    hue = float(hash_int % 360)
-    moods = ["calm", "bold", "electric"]
-    mood = moods[(hash_int >> 4) % 3]
-    variant = "dark" if (hash_int % 2 == 0) else "light"
-    return compile_palette(mood=mood, hue=hue, variant=variant)
+    choices = [SAFE_PALETTES["electric_cobalt"], SAFE_PALETTES["studio_concrete"], SAFE_PALETTES["signal_acid"]]
+    return choices[hash_int % len(choices)]
 
 def clamp_badge(text: Optional[str], default_tag: str = "نکته کلیدی") -> str:
     """

@@ -6,11 +6,57 @@ import re
 import time
 from contracts.creative_spec import (
     CreativeSpec, DesignSystem, Palette, TypeScale, Grid, MotionSignature, RevealConfig, Scene, SceneContent,
-    CreativeDNA, CompositionGraph, SceneNode, LayerNode, generate_harmonic_palette
+    CreativeDNA, CompositionGraph, SceneNode, LayerNode, generate_harmonic_palette, clamp_badge
 )
 from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_LAYOUTS = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
+
+def enforce_layout_diversity(scenes: List[Any]) -> List[Any]:
+    """
+    Enforces strict layout diversity rules across scenes:
+    1. No two consecutive scenes may share the same layout.
+    2. For a >= 4 scene video, mandate at least 3 distinct structural archetypes
+       ('split_viewport', 'bento_grid', 'metric_punch', 'specimen_ladder', 'hero_focus').
+    3. If multiple 'hero_focus' scenes appear in a row or layout monoculture occurs,
+       auto-mutate alternating scenes into 'split_viewport' or 'bento_grid'.
+    """
+    if not scenes:
+        return scenes
+
+    alternatives = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch"]
+
+    # Pass 1: Normalize layouts and mutate consecutive duplicates
+    for i in range(len(scenes)):
+        curr = getattr(scenes[i], "layout", None)
+        if not curr or curr not in ALLOWED_LAYOUTS:
+            curr = alternatives[i % len(alternatives)]
+            scenes[i].layout = curr
+
+        if i > 0:
+            prev = getattr(scenes[i - 1], "layout", None)
+            if curr == prev:
+                candidates = [l for l in alternatives if l != prev]
+                scenes[i].layout = candidates[i % len(candidates)]
+
+    # Pass 2: If >= 4 scenes, ensure at least 3 distinct structural archetypes
+    if len(scenes) >= 4:
+        distinct = set(getattr(s, "layout", "") for s in scenes)
+        if len(distinct) < 3:
+            pattern = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
+            for i in range(len(scenes)):
+                scenes[i].layout = pattern[i % len(pattern)]
+
+    # Pass 3: Final pass to guarantee strict alternating variety
+    for i in range(1, len(scenes)):
+        if getattr(scenes[i], "layout", None) == getattr(scenes[i - 1], "layout", None):
+            prev = getattr(scenes[i - 1], "layout", None)
+            candidates = [l for l in alternatives if l != prev]
+            scenes[i].layout = candidates[0]
+
+    return scenes
 
 def post_json(url: str, headers: dict, payload: dict, timeout: int = 30) -> dict:
     """Robust HTTP POST supporting requests or standard urllib."""
@@ -456,12 +502,18 @@ def direct_scenes_with_llm(words: list, full_text: str, duration: float, fps: in
 
 RENDERER_CAPABILITY_MANIFEST = """
 RENDERER V2 CAPABILITY MANIFEST:
+- Structural Archetypes (Layouts):
+  - 'split_viewport': Asymmetrical dual-zone layout. Elevated card with badge on one side, bold hero text on the other.
+  - 'bento_grid': Elevated 2x2 cards with subtle borders, glassmorphism, data anchors, and punchy typography.
+  - 'specimen_ladder': Staggered typographic ladder with high-contrast architectural margins.
+  - 'metric_punch': High-contrast numeric/milestone card with snappy spring punch.
+  - 'hero_focus': Monumental centered thesis typography with kinetic badge pill and horizontal rule.
 - Camera Dynamics: 'push' (subtle slow scale zoom), 'pan_left', 'pan_right', 'drift', 'static'.
 - Transition Types: 'wipe' (RTL geometric uncover), 'glitch' (chromatic shift), 'dissolve', 'cut'.
 - Layer Types:
   - 'typography': Native continuous Persian text (NO per-letter DOM splitting). Weights: '300', '500', '700', '900'.
   - 'vector_shape': Geometric architectural accent lines, framing brackets, framing grids.
-  - 'kinetic_badge': Architectural pill or label metadata chip.
+  - 'kinetic_badge': Architectural pill or label metadata chip (clamped to <= 3 words, max 20 chars).
 - Spatial Anchors: 'center', 'top_left', 'top_center', 'bottom_center', 'bottom_left', 'bottom_right'.
 - Action Verbs (physically mapped to motion curves in Remotion):
   - 'compress': Elements converge under high spatial pressure towards center.
@@ -608,24 +660,31 @@ def compile_composition_graph(
         f"{RENDERER_CAPABILITY_MANIFEST}\n\n"
         "GRAPH RULES:\n"
         "1. Create 4 to 7 coherent narrative scenes partitioning frames 0 to " + str(total_frames) + " continuously.\n"
-        "2. Use AudioAnchors (especially 'cadential_pause' >350ms) as natural scene boundary split points!\n"
-        "3. Every scene MUST specify a 'camera_dynamic' ('push', 'pan_left', 'pan_right', 'drift', 'static') and 'entry_transition'.\n"
-        "4. Layers MUST use action verbs from the CreativeDNA: " + json.dumps(creative_dna.transformation_verbs) + ".\n"
-        "5. FINAL SCENE RESOLUTION: The final scene MUST visually resolve the emotional contradiction ("
+        "2. LAYOUT DIVERSITY: Every scene MUST specify a 'layout': 'split_viewport' | 'bento_grid' | 'specimen_ladder' | 'metric_punch' | 'hero_focus'.\n"
+        "   - STRICT: No two consecutive scenes may share the same layout!\n"
+        "   - MANDATORY: Use at least 3 distinct structural archetypes across the video.\n"
+        "3. BADGE CLAMP: Optional 'badge' on scene: ultra-short category tag <= 3 words, max 20 chars (e.g. '#کاریابی', 'LINKEDIN', 'TIP 01'). NEVER put the thesis or long sentences in badge!\n"
+        "4. Use AudioAnchors (especially 'cadential_pause' >350ms) as natural scene boundary split points!\n"
+        "5. Every scene MUST specify a 'camera_dynamic' ('push', 'pan_left', 'pan_right', 'drift', 'static') and 'entry_transition'.\n"
+        "6. Layers MUST use action verbs from the CreativeDNA: " + json.dumps(creative_dna.transformation_verbs) + ".\n"
+        "7. FINAL SCENE RESOLUTION: The final scene MUST visually resolve the emotional contradiction ("
         + creative_dna.emotional_contradiction + ") using the 'reconcile' action verb or harmonious spatial synthesis.\n"
-        "6. Output ONLY pure valid JSON conforming to the schema below. No markdown fences.\n\n"
+        "8. Output ONLY pure valid JSON conforming to the schema below. No markdown fences.\n\n"
         "SCHEMA:\n"
         "{\n"
         '  "scenes": [\n'
         "    {\n"
         '      "id": "scene_01",\n'
+        '      "layout": "split_viewport",\n'
+        '      "badge": "TIP 01",\n'
         '      "start_frame": 0,\n'
         '      "end_frame": 120,\n'
         '      "camera_dynamic": "push",\n'
         '      "entry_transition": "wipe",\n'
         '      "narrative_beat": "Initial tension",\n'
         '      "layers": [\n'
-        '        {"id": "l_01", "type": "typography", "text": "...", "weight": "900", "is_hero": true, "spatial_anchor": "center", "action_verb": "compress"}\n'
+        '        {"id": "l_01", "type": "kinetic_badge", "text": "TIP 01", "weight": "700", "is_hero": false, "spatial_anchor": "top_center", "action_verb": "accrete"},\n'
+        '        {"id": "l_02", "type": "typography", "text": "...", "weight": "900", "is_hero": true, "spatial_anchor": "center", "action_verb": "compress"}\n'
         "      ]\n"
         "    }\n"
         "  ]\n"
@@ -679,10 +738,14 @@ def compile_composition_graph(
 
                 layers: List[LayerNode] = []
                 for l_idx, rl in enumerate(rs.get("layers", [])):
+                    layer_text = clean_line_typography(rl.get("text", ""))
+                    l_type = rl.get("type", "typography")
+                    if l_type == "kinetic_badge":
+                        layer_text = clamp_badge(layer_text)
                     layers.append(LayerNode(
                         id=rl.get("id", f"l_{idx+1}_{l_idx+1}"),
-                        type=rl.get("type", "typography"),
-                        text=clean_line_typography(rl.get("text", "")),
+                        type=l_type,
+                        text=layer_text,
                         weight=str(rl.get("weight", "700")),
                         is_hero=bool(rl.get("is_hero", l_idx == 0)),
                         spatial_anchor=rl.get("spatial_anchor", "center"),
@@ -702,12 +765,18 @@ def compile_composition_graph(
                         action_verb="compress"
                     ))
 
+                raw_layout = rs.get("layout", "split_viewport" if idx % 2 == 1 else "hero_focus")
+                raw_badge = rs.get("badge") or rs.get("badge_label") or rs.get("badgeLabel")
+                badge = clamp_badge(raw_badge) if raw_badge else None
+
                 scene_nodes.append(SceneNode(
                     id=rs.get("id", f"scene_{idx+1:02d}"),
                     frame_range=[cur_start, end_f],
+                    layout=raw_layout,
                     camera_dynamic=rs.get("camera_dynamic", "push"),
                     entry_transition=rs.get("entry_transition", "wipe"),
                     exit_transition=rs.get("exit_transition", "cut"),
+                    badge=badge,
                     layers=layers,
                     narrative_beat=rs.get("narrative_beat", "")
                 ))
@@ -715,6 +784,9 @@ def compile_composition_graph(
 
             scene_nodes[0].frame_range[0] = 0
             scene_nodes[-1].frame_range[1] = total_frames
+
+            # Ban layout monoculture and enforce consecutive diversity
+            scene_nodes = enforce_layout_diversity(scene_nodes)
 
             logger.info(f"✅ Stage 2 Graph Compiled: {len(scene_nodes)} SceneNodes (Attempt {attempt+1})")
             return CompositionGraph(
@@ -757,6 +829,7 @@ def fallback_procedural_composition_graph(
     scenes: List[SceneNode] = []
     camera_cycle = ["push", "pan_left", "push", "pan_right", "drift"]
     transition_cycle = ["wipe", "glitch", "wipe", "cut"]
+    layout_cycle = ["split_viewport", "bento_grid", "specimen_ladder", "metric_punch", "hero_focus"]
     verbs = creative_dna.transformation_verbs or ["compress", "accrete", "reconcile"]
 
     for i in range(len(bounds) - 1):
@@ -772,6 +845,7 @@ def fallback_procedural_composition_graph(
         # Final scene resolution
         is_final = (i == len(bounds) - 2)
         verb = "reconcile" if is_final else verbs[i % len(verbs)]
+        badge = clamp_badge(scene_words[0] if scene_words else "نکته کلیدی")
 
         layer = LayerNode(
             id=f"l_{i+1}_main",
@@ -786,11 +860,15 @@ def fallback_procedural_composition_graph(
         scenes.append(SceneNode(
             id=f"scene_{i+1:02d}",
             frame_range=[f_start, f_end],
+            layout=layout_cycle[i % len(layout_cycle)],
             camera_dynamic=camera_cycle[i % len(camera_cycle)],
             entry_transition=transition_cycle[i % len(transition_cycle)],
+            badge=badge,
             layers=[layer],
             narrative_beat="Resolution" if is_final else f"Movement {i+1}"
         ))
+
+    scenes = enforce_layout_diversity(scenes)
 
     return CompositionGraph(
         meta={"total_frames": total_frames, "fps": fps, "width": 1080, "height": 1080},
@@ -841,13 +919,15 @@ def fallback_procedural_creative_spec(
         ]
         legacy_scenes.append(Scene(
             id=sn.id,
-            layout="hero_focus",
+            layout=sn.layout,
             frame_range=sn.frame_range,
             reveal=RevealConfig(primitive="block_wipe" if sn.entry_transition == "wipe" else "glitch_decode", target="phrase"),
             content=content_items,
+            badge=sn.badge,
             layers=sn.layers,
             camera_dynamic=sn.camera_dynamic
         ))
+    legacy_scenes = enforce_layout_diversity(legacy_scenes)
 
     design_system = DesignSystem(
         concept=dna.metaphor_system,
@@ -909,7 +989,7 @@ def direct_creative_spec(
 
             scenes.append(Scene(
                 id=sn.id,
-                layout="hero_focus",
+                layout=sn.layout,
                 frame_range=sn.frame_range,
                 reveal=RevealConfig(
                     primitive="block_wipe" if sn.entry_transition == "wipe" else "glitch_decode",
@@ -918,9 +998,11 @@ def direct_creative_spec(
                     stagger_frames=4
                 ),
                 content=content_items,
+                badge=sn.badge,
                 layers=sn.layers,
                 camera_dynamic=sn.camera_dynamic
             ))
+        scenes = enforce_layout_diversity(scenes)
 
         ds = DesignSystem(
             concept=creative_dna.metaphor_system,
@@ -971,7 +1053,7 @@ def _record_spec_in_audit(
             "lines": [c.text for c in s.content],
             "theme": spec.design_system.palette.bg,
             "alignment": spec.design_system.grid.alignment,
-            "badgeLabel": spec.design_system.concept,
+            "badgeLabel": s.badge or "نکته کلیدی",
             "camera_dynamic": s.camera_dynamic
         })
     audit.record_director(

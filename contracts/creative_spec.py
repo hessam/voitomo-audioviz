@@ -101,6 +101,22 @@ def generate_harmonic_palette(seed_text: str, mood_verb: str = "") -> Palette:
     base = HARMONIC_PALETTES[idx]
     return Palette(bg=base.bg, fg=base.fg, accent=base.accent, muted=base.muted)
 
+def clamp_badge(text: Optional[str], default_tag: str = "نکته کلیدی") -> str:
+    """
+    Clamp badge to <= 3 words and <= 20 characters.
+    Strictly prevents essay-length sentences or CreativeDNA.thesis from leaking into badges.
+    """
+    if not text or not isinstance(text, str):
+        return default_tag
+    cleaned = text.strip().replace("\n", " ")
+    words = cleaned.split()
+    if not words:
+        return default_tag
+    clamped = " ".join(words[:3])
+    if len(clamped) > 20:
+        clamped = clamped[:20].rstrip()
+    return clamped or default_tag
+
 @dataclass
 class LayerNode:
     id: str
@@ -113,10 +129,13 @@ class LayerNode:
     style: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        clean_text = self.text
+        if self.type == "kinetic_badge" and clean_text:
+            clean_text = clamp_badge(clean_text)
         return {
             "id": self.id,
             "type": self.type,
-            "text": self.text,
+            "text": clean_text,
             "weight": self.weight,
             "is_hero": self.is_hero,
             "spatial_anchor": self.spatial_anchor,
@@ -128,9 +147,11 @@ class LayerNode:
 class SceneNode:
     id: str
     frame_range: List[int]  # [start_frame, end_frame]
+    layout: str = "hero_focus"  # "split_viewport" | "bento_grid" | "specimen_ladder" | "metric_punch" | "hero_focus"
     camera_dynamic: str = "push"  # "push" | "pan_left" | "pan_right" | "drift" | "static"
     entry_transition: str = "wipe"  # "wipe" | "cut" | "glitch" | "dissolve"
     exit_transition: str = "cut"
+    badge: Optional[str] = None  # Clamped <= 3 words, max 20 chars
     layers: List[LayerNode] = field(default_factory=list)
     narrative_beat: str = ""
 
@@ -138,9 +159,11 @@ class SceneNode:
         return {
             "id": self.id,
             "frame_range": self.frame_range,
+            "layout": self.layout,
             "camera_dynamic": self.camera_dynamic,
             "entry_transition": self.entry_transition,
             "exit_transition": self.exit_transition,
+            "badge": clamp_badge(self.badge) if self.badge else None,
             "layers": [l.to_dict() for l in self.layers],
             "narrative_beat": self.narrative_beat
         }
@@ -188,10 +211,11 @@ class SceneContent:
 @dataclass
 class Scene:
     id: str
-    layout: str  # "hero_focus" | "specimen_ladder" | "paragraph_stack" | "caption_panel" | "composition_graph"
+    layout: str  # "hero_focus" | "split_viewport" | "bento_grid" | "specimen_ladder" | "metric_punch" | "paragraph_stack" | "caption_panel"
     frame_range: List[int]  # [start_frame, end_frame]
     reveal: RevealConfig
     content: List[SceneContent]
+    badge: Optional[str] = None  # Clamped <= 3 words, max 20 chars
     motion: Dict[str, Any] = field(default_factory=dict)
     layers: Optional[List[LayerNode]] = None
     camera_dynamic: str = "push"
@@ -216,6 +240,7 @@ class CreativeSpec:
                         "frame_range": s.frame_range,
                         "reveal": asdict(s.reveal),
                         "content": [asdict(c) for c in s.content],
+                        "badge": clamp_badge(s.badge) if s.badge else None,
                         "motion": s.motion,
                         "layers": [l.to_dict() for l in s.layers] if s.layers else None,
                         "camera_dynamic": s.camera_dynamic

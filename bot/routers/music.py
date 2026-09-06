@@ -155,6 +155,8 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"🎬 در حال کارگردانی پرده‌های ترانه و رندر روی ضرب‌آهنگ با سبک {PROFILES.get(profile_key, profile_key)}...")
 
     duration_frames = max(1, round(lyrics.get("duration", 30.0) * 30))
+    scenes = []
+    caption_extra = ""
 
     if profile_key == "swiss_clean":
         spec = direct_creative_spec(
@@ -168,7 +170,8 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
             "durationInFrames": duration_frames,
             "profile": profile_key
         }
-        caption_extra = f"✦ سبک: تایپوگرافی سوئیسی (Glitch-Decode)\n✦ ایده ساختاری: {spec.design_system.concept}"
+        scenes = spec.scenes
+        caption_extra = f"✦ سبک: تایپوگرافی سوئیسی (Glitch-Decode)\n✦ ایده ساختاری: {spec.design_system.concept}\n✦ پرده‌های روایی: {len(scenes)} پرده"
     else:
         # Direct kinetic scenes synced to musical beat grid
         scenes = direct_music_scenes(
@@ -204,9 +207,7 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
 
         await callback.message.answer_video(
             video=video_file,
-            caption=f"🎵 *موزیک ویدیوی کینتیک آماده شد!*\n\n"
-                    f"⚡ هماهنگ‌شده با ضرب‌آهنگ {rhythm_info.get('bpm')} BPM\n"
-                    f"✦ پرده‌های روایی: {len(scenes)} پرده ریتمیک",
+            caption=f"🎵 *موزیک ویدیوی کینتیک آماده شد!*\n\n{caption_extra}",
             parse_mode="Markdown"
         )
 

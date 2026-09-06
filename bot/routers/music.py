@@ -162,7 +162,8 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
         spec = direct_creative_spec(
             words=lyrics.get("words", []),
             fps=30,
-            duration_sec=lyrics.get("duration", 30.0)
+            duration_sec=lyrics.get("duration", 30.0),
+            audio_type="music"
         )
         props = {
             "creativeSpec": spec.to_dict(),

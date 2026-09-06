@@ -526,18 +526,43 @@ RENDERER V2 CAPABILITY MANIFEST:
 - Supported Fonts: 'Dana' (geometric, punchy, modern), 'Vazirmatn' (editorial, humanistic).
 """
 
+def classify_visual_world(
+    transcript: str,
+    audio_type: Optional[str] = None,
+    audio_anchors: Optional[List[Any]] = None
+) -> str:
+    """
+    Narrative Intent ➔ Visual World Classifier:
+    - kinetic-poster: Music / Lyric / Poetry (80-120px full-canvas typography, stacked verses, phrase-reveal motion)
+    - editorial: Education / Tutorial / LinkedIn (Chapter cards, step badges, balanced 55px typography)
+    - pop-bento: Commercial / Ad / Promo (Dynamic variable product/benefit tiles, punchy CTA takeovers)
+    """
+    transcript_lower = transcript.lower() if transcript else ""
+    music_keywords = ["آواز", "ترانه", "موزیک", "شعر", "عشق", "یار", "تنها", "دل", "خواننده", "آهنگ", "موسیقی"]
+    if audio_type == "music" or any(k in transcript_lower for k in music_keywords):
+        return "kinetic-poster"
+
+    editorial_keywords = ["آموزش", "تکنیک", "چطور", "لینکدین", "سیستم", "پروژه", "استراتژی", "نکته", "راهنما", "تحلیل", "مدیریت"]
+    if any(k in transcript_lower for k in editorial_keywords):
+        return "editorial"
+
+    return "pop-bento"
+
+
 def synthesize_creative_dna(
     full_text: str,
     duration: float,
     audio_anchors: Optional[List[Any]] = None,
+    audio_type: Optional[str] = None,
     audit: Any = None
 ) -> CreativeDNA:
     """
     Stage 1: Pre-storyboard synthesis phase.
     Extracts thesis, emotional contradiction, relational metaphor, transformation verbs,
-    and a bespoke harmonic palette.
+    visual world, and a bespoke harmonic palette.
     """
     t0 = time.time()
+    world = classify_visual_world(full_text, audio_type, audio_anchors)
     anchor_summary = [
         {"frame": a.frame, "type": a.type, "word": a.associated_word, "dur": a.duration_sec}
         for a in (audio_anchors or [])
@@ -606,9 +631,10 @@ def synthesize_creative_dna(
             metaphor_system=sanitize_anti_slop(parsed.get("metaphor_system", "Architectural Kinetic Progression")),
             transformation_verbs=parsed.get("transformation_verbs", ["compress", "accrete", "reconcile"]),
             palette=clean_palette,
-            font_family=parsed.get("font_family", "Dana")
+            font_family=parsed.get("font_family", "Dana"),
+            world=world
         )
-        logger.info(f"✅ Stage 1 CreativeDNA Synthesized: {dna.metaphor_system} (verbs: {dna.transformation_verbs})")
+        logger.info(f"✅ Stage 1 CreativeDNA Synthesized: {dna.metaphor_system} (world: {dna.world}, verbs: {dna.transformation_verbs})")
         return dna
     except Exception as e:
         logger.warning(f"Stage 1 CreativeDNA synthesis failed ({e}), falling back to procedural generation.")
@@ -623,7 +649,8 @@ def synthesize_creative_dna(
         metaphor_system=f"تراکم هندسی مفاهیم پیرامون {lead_word}",
         transformation_verbs=["compress", "accrete", "reconcile"],
         palette=palette,
-        font_family="Dana"
+        font_family="Dana",
+        world=world
     )
 
 
@@ -788,14 +815,16 @@ def fallback_procedural_creative_spec(
     words: List[Dict],
     fps: int,
     total_frames: int,
-    total_sec: float,
-    audio_anchors: Optional[List[Any]] = None
+    total_sec: float = 10.0,
+    audio_anchors: Optional[List[Any]] = None,
+    audio_type: Optional[str] = None
 ) -> CreativeSpec:
     """
     Deterministic procedural fallback for CreativeSpec using v2 harmonic palettes and Graph IR.
     STRICT BAN on '#090A0F'.
     """
     full_text = " ".join(w["word"] for w in words).strip() if words else "موشن‌گرافی"
+    world = classify_visual_world(full_text, audio_type, audio_anchors)
     keywords = extract_meaningful_keywords(words)
     lead_word = keywords[0] if keywords else "طراحی"
 
@@ -810,7 +839,8 @@ def fallback_procedural_creative_spec(
         metaphor_system=f"تراکم هندسی عناصر پیرامون {lead_word}",
         transformation_verbs=["compress", "accrete", "reconcile"],
         palette=palette,
-        font_family=font_family
+        font_family=font_family,
+        world=world
     )
 
     graph = fallback_procedural_composition_graph(dna, words, audio_anchors or [], total_frames, fps)
@@ -857,7 +887,8 @@ def direct_creative_spec(
     fps: int = 30,
     duration_sec: float = 0.0,
     audit: Any = None,
-    audio_anchors: Optional[List[Any]] = None
+    audio_anchors: Optional[List[Any]] = None,
+    audio_type: Optional[str] = None
 ) -> CreativeSpec:
     """
     Two-Step Voitomo v2 Generative Art Director:
@@ -869,7 +900,7 @@ def direct_creative_spec(
     full_text = " ".join(w["word"] for w in words).strip() if words else ""
 
     if not words or not OPENROUTER_API_KEY:
-        fb_spec = fallback_procedural_creative_spec(words, fps, total_frames, total_sec, audio_anchors)
+        fb_spec = fallback_procedural_creative_spec(words, fps, total_frames, total_sec, audio_anchors, audio_type=audio_type)
         if audit:
             _record_spec_in_audit(audit, fb_spec, "N/A (empty or no API key)", 0.0, was_fallback=True, fallback_reason="No API key or empty words")
         return fb_spec
@@ -877,7 +908,7 @@ def direct_creative_spec(
     t0 = time.time()
     try:
         # Step 1: Synthesize CreativeDNA
-        creative_dna = synthesize_creative_dna(full_text, total_sec, audio_anchors, audit=audit)
+        creative_dna = synthesize_creative_dna(full_text, total_sec, audio_anchors, audio_type=audio_type, audit=audit)
 
         # Step 2: Compile Composition Graph with Single-Stage Repair
         graph = compile_composition_graph(creative_dna, words, audio_anchors or [], total_frames, fps, audit=audit)

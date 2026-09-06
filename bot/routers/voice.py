@@ -12,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 import sys
 sys.path.insert(0, "/root/workspace")
 from bot.services.transcriber import transcribe
-from bot.services.director import direct_scenes_with_llm, direct_creative_spec
+from bot.services.director import direct_scenes_with_llm, direct_creative_spec, synthesize_creative_dna, compile_composition_graph
 from bot.services.alignment import realign_transcript
 from bot.services.normalizer import normalize_persian_asr
 from bot.services.audit import WorkflowAudit, LOGS_DIR
@@ -233,6 +233,20 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
         audio_anchors = await AudioIntelligenceAdapter.extract_audio_prosody_async(
             ogg_path, transcript["words"], fps=30
         )
+        creative_dna = synthesize_creative_dna(
+            full_text=transcript["text"],
+            duration=transcript["duration"],
+            audio_anchors=audio_anchors,
+            audit=audit
+        )
+        composition_graph = compile_composition_graph(
+            creative_dna=creative_dna,
+            words=transcript["words"],
+            audio_anchors=audio_anchors,
+            total_frames=duration_frames,
+            fps=30,
+            audit=audit
+        )
         spec = direct_creative_spec(
             words=transcript["words"],
             fps=30,
@@ -240,8 +254,11 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
             audit=audit,
             audio_anchors=audio_anchors
         )
+        spec_dict = spec.to_dict()
+        spec_dict["composition_graph"] = composition_graph.to_dict()
         props = {
-            "creativeSpec": spec.to_dict(),
+            "creativeSpec": spec_dict,
+            "compositionGraph": composition_graph.to_dict(),
             "words": transcript["words"],
             "audioSrc": ogg_path,
             "durationInFrames": duration_frames,
@@ -361,16 +378,34 @@ async def handle_word_edit(message: Message, state: FSMContext):
     full_text = " ".join(w["word"] for w in words)
     duration = words[-1]["end"] if words else 10.0
 
-    scenes = direct_scenes_with_llm(words, full_text, duration)
-
-    props = {
-        "scenes": scenes,
-        "words": words,
-        "text": full_text,
-        "audioSrc": ogg_path,
-        "durationInFrames": max(1, round(duration * 30)),
-        "profile": profile_key
-    }
+    duration_frames = max(1, round(duration * 30))
+    if profile_key == "swiss_clean":
+        audio_anchors = await AudioIntelligenceAdapter.extract_audio_prosody_async(
+            ogg_path, words, fps=30
+        )
+        spec = direct_creative_spec(
+            words=words,
+            fps=30,
+            duration_sec=duration,
+            audio_anchors=audio_anchors
+        )
+        props = {
+            "creativeSpec": spec.to_dict(),
+            "words": words,
+            "audioSrc": ogg_path,
+            "durationInFrames": duration_frames,
+            "profile": profile_key
+        }
+    else:
+        scenes = direct_scenes_with_llm(words, full_text, duration)
+        props = {
+            "scenes": scenes,
+            "words": words,
+            "text": full_text,
+            "audioSrc": ogg_path,
+            "durationInFrames": duration_frames,
+            "profile": profile_key
+        }
 
     try:
         async with aiohttp.ClientSession() as session:

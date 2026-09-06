@@ -258,9 +258,13 @@ class SceneNode:
     badge: Optional[str] = None  # Clamped <= 3 words, max 20 chars
     layers: List[LayerNode] = field(default_factory=list)
     narrative_beat: str = ""
+    spatial: Optional[Dict[str, Any]] = None
+    environment: Optional[Dict[str, Any]] = None
+    asset: Optional[Dict[str, Any]] = None
+    type_spec: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "id": self.id,
             "frame_range": self.frame_range,
             "layout": self.layout,
@@ -271,6 +275,19 @@ class SceneNode:
             "layers": [l.to_dict() for l in self.layers],
             "narrative_beat": self.narrative_beat
         }
+        if self.spatial:
+            d["spatial"] = self.spatial
+            d["hero_layer"] = self.spatial.get("hero_layer", "typography")
+            d["assetBox"] = self.spatial.get("asset_box") or self.spatial.get("assetBox")
+            d["typeBox"] = self.spatial.get("type_box") or self.spatial.get("typeBox")
+        if self.environment:
+            d["environment"] = self.environment
+        if self.asset:
+            d["asset"] = self.asset
+        if self.type_spec:
+            d["type"] = self.type_spec
+            d["type_spec"] = self.type_spec
+        return d
 
 @dataclass
 class CompositionGraph:
@@ -328,6 +345,10 @@ class Scene:
     motion: Dict[str, Any] = field(default_factory=dict)
     layers: Optional[List[LayerNode]] = None
     camera_dynamic: str = "push"
+    spatial: Optional[Dict[str, Any]] = None
+    environment: Optional[Dict[str, Any]] = None
+    asset: Optional[Dict[str, Any]] = None
+    type_spec: Optional[Dict[str, Any]] = None
 
 @dataclass
 class CreativeSpec:
@@ -345,24 +366,38 @@ class CreativeSpec:
             p["tapeText"] = p.get("tape_text", "#000000")
             p["shadowBlock"] = p.get("shadow_block", "#000000")
 
+        timeline_scenes = []
+        for s in self.scenes:
+            sc_dict = {
+                "id": s.id,
+                "layout": s.layout,
+                "frame_range": s.frame_range,
+                "reveal": asdict(s.reveal),
+                "content": [asdict(c) for c in s.content],
+                "badge": clamp_badge(s.badge) if s.badge else None,
+                "motion": s.motion,
+                "layers": [l.to_dict() for l in s.layers] if s.layers else None,
+                "camera_dynamic": s.camera_dynamic
+            }
+            if s.spatial:
+                sc_dict["spatial"] = s.spatial
+                sc_dict["hero_layer"] = s.spatial.get("hero_layer", "typography")
+                sc_dict["assetBox"] = s.spatial.get("asset_box") or s.spatial.get("assetBox")
+                sc_dict["typeBox"] = s.spatial.get("type_box") or s.spatial.get("typeBox")
+            if s.environment:
+                sc_dict["environment"] = s.environment
+            if s.asset:
+                sc_dict["asset"] = s.asset
+            if s.type_spec:
+                sc_dict["type"] = s.type_spec
+                sc_dict["type_spec"] = s.type_spec
+            timeline_scenes.append(sc_dict)
+
         d = {
             "meta": self.meta,
             "design_system": ds_dict,
             "timeline": {
-                "scenes": [
-                    {
-                        "id": s.id,
-                        "layout": s.layout,
-                        "frame_range": s.frame_range,
-                        "reveal": asdict(s.reveal),
-                        "content": [asdict(c) for c in s.content],
-                        "badge": clamp_badge(s.badge) if s.badge else None,
-                        "motion": s.motion,
-                        "layers": [l.to_dict() for l in s.layers] if s.layers else None,
-                        "camera_dynamic": s.camera_dynamic
-                    }
-                    for s in self.scenes
-                ]
+                "scenes": timeline_scenes
             }
         }
         if self.creative_dna:

@@ -10,6 +10,10 @@ from contracts.creative_spec import (
     safe_hue, compile_palette, SAFE_PALETTES, is_banned_sludge_color
 )
 from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop, hex_to_rgb
+from bot.services.spatial_director import SpatialDirectorEngine, SpatialAllocation, Rect
+from bot.services.environment_engine import EnvironmentEngine, EnvironmentSpec
+from bot.services.asset_engine import AssetEngine, AssetSpec
+from bot.services.type_engine import KineticTypeEngine, TypeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -784,6 +788,11 @@ def build_kinetic_phrase_scenes(
     if not is_music and classify_visual_world(full_transcript) == "kinetic-poster":
         is_music = True
 
+    # Visual world and palette setup for 4-engine negotiation
+    world = getattr(creative_dna, "world", "editorial") if creative_dna else "editorial"
+    palette = getattr(creative_dna, "palette", None) or SAFE_PALETTES["electric_cobalt"]
+    topic = AssetEngine.detect_topic(full_transcript or "سوئیس", world=world)
+
     for idx, c in enumerate(chunks):
         f_start = bounds[idx]
         f_end = bounds[idx + 1]
@@ -797,8 +806,47 @@ def build_kinetic_phrase_scenes(
         badge_candidates = [w.get("word", "") for w in c if len(w.get("word", "")) >= 3]
         badge_str = clamp_badge(badge_candidates[0] if badge_candidates else f"نکته {idx+1}")
 
+        # 1. Kinetic Typography Engine proposal:
+        type_proposal = KineticTypeEngine.propose(
+            phrase_text=cleaned_text,
+            words=c,
+            scene_idx=idx,
+            is_hero_candidate=True,
+            is_music=is_music
+        )
+
+        # 2. Metaphor Asset Engine proposal:
+        asset_proposal = AssetEngine.propose(
+            phrase_text=cleaned_text,
+            topic=topic,
+            palette=palette,
+            scene_idx=idx
+        )
+
+        # 3. Spatial Director Engine: Negotiate Canvas & Saliency Budget
+        spatial_alloc = SpatialDirectorEngine.allocate(
+            type_proposal=type_proposal.to_dict(),
+            asset_proposal=asset_proposal.to_dict() if asset_proposal else None,
+            scene_idx=idx,
+            total_scenes=len(chunks),
+            is_music=is_music
+        )
+
+        # 4. Environment Engine: Procedural Atmosphere
+        env_proposal = EnvironmentEngine.propose(
+            seed_text=cleaned_text,
+            palette=palette,
+            saliency_contrast=spatial_alloc.env_contrast,
+            scene_idx=idx,
+            world=world
+        )
+
         # Derive layout from phrase meaning or music
         layout = derive_phrase_layout(phrase_text, is_music=is_music)
+        if spatial_alloc.archetype == "asset_dominant" and not is_music:
+            layout = "bento_grid"
+        elif spatial_alloc.archetype == "split_contrast" and not is_music:
+            layout = "split_viewport"
 
         layer = LayerNode(
             id=f"l_{idx+1:02d}_hero",
@@ -818,10 +866,14 @@ def build_kinetic_phrase_scenes(
             entry_transition=transition_cycle[idx % len(transition_cycle)],
             badge="" if is_music else badge_str,
             layers=[layer],
-            narrative_beat="Resolution" if is_final else f"Phrase Beat {idx+1}"
+            narrative_beat="Resolution" if is_final else f"Phrase Beat {idx+1}",
+            spatial=spatial_alloc.to_dict(),
+            environment=env_proposal.to_dict(),
+            asset=asset_proposal.to_dict() if asset_proposal else None,
+            type_spec=type_proposal.to_dict()
         ))
 
-    scenes = enforce_layout_diversity(scenes)
+    scenes = enforce_layout_diversity(scenes, is_music=is_music)
     return scenes
 
 
@@ -908,7 +960,11 @@ def fallback_procedural_creative_spec(
             content=content_items,
             badge=sn.badge,
             layers=sn.layers,
-            camera_dynamic=sn.camera_dynamic
+            camera_dynamic=sn.camera_dynamic,
+            spatial=sn.spatial,
+            environment=sn.environment,
+            asset=sn.asset,
+            type_spec=sn.type_spec
         ))
     legacy_scenes = enforce_layout_diversity(legacy_scenes)
 
@@ -984,7 +1040,11 @@ def direct_creative_spec(
                 content=content_items,
                 badge=sn.badge,
                 layers=sn.layers,
-                camera_dynamic=sn.camera_dynamic
+                camera_dynamic=sn.camera_dynamic,
+                spatial=sn.spatial,
+                environment=sn.environment,
+                asset=sn.asset,
+                type_spec=sn.type_spec
             ))
         scenes = enforce_layout_diversity(scenes)
 

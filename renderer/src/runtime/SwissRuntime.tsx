@@ -261,6 +261,10 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
     activeScene?.spatial || activeScene?.environment || activeScene?.asset || activeScene?.type
   );
 
+  // Persistent Continuous Camera Momentum (scale: 1.0 -> 1.15 across full video duration)
+  const globalProgress = Math.min(1, Math.max(0, frame / (totalFrames || 1)));
+  const globalCameraScale = interpolate(globalProgress, [0, 1], [1.0, 1.15]);
+
   return (
     <div
       style={{
@@ -270,6 +274,8 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
         position: "relative",
         overflow: "hidden",
         fontFamily,
+        transform: `scale(${globalCameraScale})`,
+        transformOrigin: "center center",
       }}
     >
       {audioSrc && <Audio src={audioSrc} />}
@@ -286,6 +292,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
             box={activeScene?.assetBox || activeScene?.spatial?.asset_box}
             saliency={activeScene?.spatial}
             startFrame={startFrame}
+            durationInFrames={sceneDuration}
           />
           <TypographyLayer
             spec={activeScene?.type || activeScene?.type_spec}

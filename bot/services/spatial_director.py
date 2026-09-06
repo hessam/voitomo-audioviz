@@ -81,59 +81,41 @@ class SpatialDirectorEngine:
         is_hero_candidate = type_proposal.get("is_hero", False)
         word_count = len(type_proposal.get("text", "").split())
 
-        # Scene Archetype Selection
+        # Strict Dual-Box Layout Contract:
+        # Forbid any zero-opacity or zero-dimension asset suppression
         if is_music:
-            # Music / Lyric / Poetry is strictly typography-first
-            archetype = "typography_dominant"
-        elif not has_asset:
-            archetype = "typography_dominant"
-        elif scene_idx == 0:
-            # First scene: strong typographic hook
-            archetype = "typography_dominant"
-        elif scene_idx == total_scenes - 1:
-            # Final resolution: Call to action or punchy conclusion
-            archetype = "split_contrast"
-        elif scene_idx % 3 == 1:
-            # Cyclic rhythm: Scene A (Visual Metaphor Dominant)
-            archetype = "asset_dominant"
-        elif scene_idx % 3 == 2:
-            # Scene C (Dual Contrast: 50/50 Split)
-            archetype = "split_contrast"
+            # Music / Lyric / Poetry: Central integrated floating over undulating ribbons/contours
+            archetype = "central_integrated"
+        elif scene_idx % 2 == 0:
+            archetype = "split_horizontal"
         else:
-            archetype = "typography_dominant"
-
-        # Conflict Firewall:
-        # If Type Engine proposes massive text (>6 words) AND archetype is asset_dominant,
-        # prevent occlusion by falling back to split_contrast.
-        if archetype == "asset_dominant" and word_count >= 6:
-            archetype = "split_contrast"
+            archetype = "split_vertical"
 
         env_box = Rect(0, 0, cls.CANVAS_WIDTH, cls.CANVAS_HEIGHT)
 
-        if archetype == "asset_dominant":
-            hero_layer = "asset"
-            # 70% Asset upper/central, 30% bottom subtitle tape
-            asset_box = Rect(x=80, y=90, w=920, h=640)
-            type_box = Rect(x=60, y=770, w=960, h=250)
-            # Saliency Budget: Hero asset 100%, non-hero typography secondary
+        if archetype == "split_horizontal":
+            hero_layer = "typography" if (word_count >= 4) else "asset"
+            # Type Box [y: 80, h: 420], Asset Box [y: 540, h: 460]
+            type_box = Rect(x=60, y=80, w=960, h=420)
+            asset_box = Rect(x=80, y=540, w=920, h=460)
             allocation = SpatialAllocation(
                 hero_layer=hero_layer,
                 archetype=archetype,
                 type_box=type_box,
                 asset_box=asset_box,
                 env_box=env_box,
-                type_opacity=0.92,
-                asset_opacity=1.0,
-                env_contrast=0.18,  # Dim environment contrast to avoid visual clutter
-                type_scale=0.95,
+                type_opacity=1.0,
+                asset_opacity=0.95,
+                env_contrast=0.20,
+                type_scale=1.0,
                 asset_scale=1.0
             )
 
-        elif archetype == "split_contrast":
-            # 50/50 Split Viewport
+        elif archetype == "split_vertical":
             hero_layer = "typography"
-            type_box = Rect(x=60, y=80, w=960, h=450)
-            asset_box = Rect(x=80, y=550, w=920, h=470)
+            # Type Box [x: 520, w: 500], Asset Box [x: 60, w: 440]
+            type_box = Rect(x=520, y=140, w=500, h=800)
+            asset_box = Rect(x=60, y=140, w=440, h=800)
             allocation = SpatialAllocation(
                 hero_layer=hero_layer,
                 archetype=archetype,
@@ -141,17 +123,16 @@ class SpatialDirectorEngine:
                 asset_box=asset_box,
                 env_box=env_box,
                 type_opacity=1.0,
-                asset_opacity=0.88,
+                asset_opacity=0.90,
                 env_contrast=0.22,
                 type_scale=1.0,
-                asset_scale=0.95
+                asset_scale=0.98
             )
 
-        else:  # typography_dominant
+        else:  # central_integrated
             hero_layer = "typography"
-            # 90% Fullscreen poster type, asset hidden or subtle watermark
-            type_box = Rect(x=60, y=140, w=960, h=800)
-            asset_box = Rect(x=0, y=0, w=0, h=0)
+            type_box = Rect(x=60, y=340, w=960, h=400)
+            asset_box = Rect(x=80, y=100, w=920, h=880)
             allocation = SpatialAllocation(
                 hero_layer=hero_layer,
                 archetype=archetype,
@@ -159,10 +140,10 @@ class SpatialDirectorEngine:
                 asset_box=asset_box,
                 env_box=env_box,
                 type_opacity=1.0,
-                asset_opacity=0.0,
-                env_contrast=0.28,
+                asset_opacity=0.75,
+                env_contrast=0.25,
                 type_scale=1.0,
-                asset_scale=0.0
+                asset_scale=1.0
             )
 
         return allocation

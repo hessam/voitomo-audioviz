@@ -1,48 +1,42 @@
 """
-Metaphor Asset Engine (The Visual Subject)
-Part of Astra's 4-Engine Negotiated Compiler.
+Procedural Visual Grammar Asset Engine
+Part of Astra's Persistent Kinetic Motion System.
 
-Generates topic-specific procedural SVGs and visual metaphors.
-Rules: Never generic bento icons.
-Topic Archetypes:
-1. Tech / Career / System:
-   - "search_console": Generative search bar with cursor & tag chips.
-   - "node_graph": Interactive node network with pulsing vertices.
-   - "credential_badge": Geometric credential crest with ribbon and stars.
-2. Poetry / Music / Arts:
-   - "fluid_waveform": Harmonic sine wave oscillation.
-   - "lunar_orbit": Morphing lunar sphere with orbital trajectory.
-   - "kinetic_rings": Concentric acoustic resonance rings.
-3. Finance / Business / Growth:
-   - "candlestick_chart": Procedural bullish candlesticks with trend vectors.
-   - "metric_dial": Radial gauge dial with growth percentage badge.
-   - "volumetric_bars": 3D stepped performance pillars.
+Replaces static clipart with 4 generative procedural primitives:
+1. particle_field: operator="align" | "attract" (Scattered particles attract/align into focused beams)
+2. connected_graph: operator="draw" | "cluster" (Isolated nodes draw dynamic vector edges)
+3. vector_ribbon: operator="accelerate" | "expand" (Flowing vector ribbons through geometric bottlenecks)
+4. concentric_contours: operator="pulse" | "radiate" (Acoustic and social resonance rings)
+
+Entities maintain persistent IDs (shared_entity_id) across narrative beats for match-morph continuity.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional
 import math
-import hashlib
 
 
 @dataclass
 class AssetSpec:
-    topic: str  # "tech_career" | "poetry_music" | "finance_business"
-    asset_type: str
+    geometry: str  # "particle_field" | "connected_graph" | "vector_ribbon" | "concentric_contours"
+    operator: str  # "align" | "attract" | "draw" | "accelerate" | "expand" | "pulse" | "radiate"
     primary_color: str
     accent_color: str
+    params: Dict[str, Any] = field(default_factory=dict)
     label: Optional[str] = None
-    data_points: List[float] = field(default_factory=list)
-    svg_data: Dict[str, Any] = field(default_factory=dict)
+    entity_id: str = "persistent_entity_01"
+    topic: str = "tech_career"
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["asset_type"] = self.geometry
+        return d
 
 
 class AssetEngine:
     """
-    Generates procedural topic-specific visual subjects bounded to the allocated box.
+    Synthesizes procedural visual grammar entities and operators.
     """
 
     TECH_KEYWORDS = ["لینکدین", "سیستم", "شرکت", "شغل", "کار", "پروژه", "رزومه", "مصاحبه", "تخصص", "فناوری", "رشد", "برند", "توسعه", "کد", "هوش مصنوعی"]
@@ -64,62 +58,75 @@ class AssetEngine:
         phrase_text: str,
         topic: str,
         palette: Any,
-        scene_idx: int = 0
-    ) -> Optional[AssetSpec]:
+        scene_idx: int = 0,
+        total_scenes: int = 1
+    ) -> AssetSpec:
         """
-        Generate procedural SVG data and dynamic parameters for the visual focal point.
+        Synthesize procedural generative entity with continuous entity ID and active operator.
         """
         primary = getattr(palette, "fg", "#FFFFFF")
         accent = getattr(palette, "accent", "#FF5500")
 
+        # Persistent entity across multi-phrase segments (clusters of 3-4 scenes)
+        cluster_id = scene_idx // 3
+        entity_id = f"entity_cluster_{cluster_id:02d}"
+
+        # Topic & relational operator mapping
         if topic == "poetry_music":
-            types = ["fluid_waveform", "lunar_orbit", "kinetic_rings"]
-            asset_type = types[scene_idx % len(types)]
-            data_points = [
-                math.sin(i * 0.4 + scene_idx) * 35 + 50
-                for i in range(16)
-            ]
-            label = "SONIC RESONANCE // FREQ 432Hz"
-            svg_data = {
-                "amplitude": 38,
-                "frequency": 2.4,
-                "rings_count": 5,
-                "orbit_tilt": 28
-            }
+            geometries = ["vector_ribbon", "concentric_contours", "particle_field"]
+            geom = geometries[scene_idx % len(geometries)]
+            if geom == "vector_ribbon":
+                operator = "flow" if scene_idx % 2 == 0 else "accelerate"
+                params = {"wave_freq": 2.2, "amplitude": 45, "ribbon_count": 4}
+                label = "HARMONIC FLOW // OSCILLATION"
+            elif geom == "concentric_contours":
+                operator = "radiate"
+                params = {"pulse_rate": 1.6, "ring_count": 6}
+                label = "SONIC RADIANCE // 432Hz"
+            else:
+                operator = "attract"
+                params = {"count": 32, "speed": 1.2}
+                label = "PARTICLE COHESION"
 
         elif topic == "finance_business":
-            types = ["candlestick_chart", "metric_dial", "volumetric_bars"]
-            asset_type = types[scene_idx % len(types)]
-            data_points = [30.0, 42.0, 38.0, 55.0, 72.0, 68.0, 89.0]
-            label = "+42% MOMENTUM // ACTIVE GROWTH"
-            svg_data = {
-                "bullish": True,
-                "bars": [40, 65, 55, 80, 95],
-                "dial_value": 78
-            }
+            geometries = ["connected_graph", "vector_ribbon", "concentric_contours"]
+            geom = geometries[scene_idx % len(geometries)]
+            if geom == "connected_graph":
+                operator = "cluster" if scene_idx % 2 == 0 else "draw"
+                params = {"nodes": 8, "edges": 12, "highlight_node": scene_idx % 8}
+                label = "CAPITAL TOPOLOGY // LIQUIDITY"
+            elif geom == "vector_ribbon":
+                operator = "accelerate"
+                params = {"wave_freq": 1.8, "amplitude": 50, "growth_vector": True}
+                label = "COMPOUNDING TRAJECTORY"
+            else:
+                operator = "pulse"
+                params = {"pulse_rate": 2.0, "ring_count": 5}
+                label = "VALUE EXPANSION // +42%"
 
         else:  # tech_career
-            types = ["search_console", "node_graph", "credential_badge"]
-            asset_type = types[scene_idx % len(types)]
-            data_points = [12.0, 24.0, 48.0, 96.0]
-            label = "VERIFIED PIPELINE // STATUS 200"
-            svg_data = {
-                "nodes": [
-                    {"x": 120, "y": 80, "label": "API"},
-                    {"x": 280, "y": 140, "label": "CORE"},
-                    {"x": 440, "y": 80, "label": "SYNC"},
-                    {"x": 280, "y": 240, "label": "HOST"}
-                ],
-                "connections": [[0, 1], [1, 2], [1, 3]],
-                "query": "opportunity.seek(persistence=True)"
-            }
+            geometries = ["connected_graph", "particle_field", "vector_ribbon"]
+            geom = geometries[scene_idx % len(geometries)]
+            if geom == "connected_graph":
+                operator = "draw" if scene_idx % 2 == 0 else "cluster"
+                params = {"nodes": 10, "edges": 15, "active_path": True}
+                label = "RELATIONAL TOPOLOGY // NETWORK"
+            elif geom == "particle_field":
+                operator = "align" if scene_idx % 2 == 0 else "attract"
+                params = {"count": 40, "beam_focus": True}
+                label = "SIGNAL COHERENCE // RECOGNITION"
+            else:
+                operator = "expand"
+                params = {"wave_freq": 2.0, "amplitude": 40}
+                label = "BOTTLENECK DILATION // FLOW"
 
         return AssetSpec(
-            topic=topic,
-            asset_type=asset_type,
+            geometry=geom,
+            operator=operator,
             primary_color=primary,
             accent_color=accent,
+            params=params,
             label=label,
-            data_points=data_points,
-            svg_data=svg_data
+            entity_id=entity_id,
+            topic=topic
         )

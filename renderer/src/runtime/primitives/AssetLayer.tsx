@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, spring, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 
 export interface RectBox {
   x: number;
@@ -9,13 +9,14 @@ export interface RectBox {
 }
 
 export interface AssetSpecInput {
-  topic?: "tech_career" | "poetry_music" | "finance_business";
-  asset_type?: string;
+  geometry?: "particle_field" | "connected_graph" | "vector_ribbon" | "concentric_contours" | string;
+  operator?: "align" | "attract" | "draw" | "cluster" | "accelerate" | "expand" | "pulse" | "radiate" | "flow" | string;
   primary_color?: string;
   accent_color?: string;
+  params?: Record<string, any>;
   label?: string;
-  data_points?: number[];
-  svg_data?: Record<string, any>;
+  entity_id?: string;
+  asset_type?: string;
 }
 
 export interface AssetLayerProps {
@@ -27,13 +28,256 @@ export interface AssetLayerProps {
     asset_scale?: number;
   };
   startFrame?: number;
+  durationInFrames?: number;
 }
+
+/**
+ * 1. ParticleField: operator="align" | "attract"
+ * Scattered particles attract or align into a coherent focused beam.
+ */
+export const ParticleField: React.FC<{
+  count?: number;
+  operator?: string;
+  primaryColor: string;
+  accentColor: string;
+  frame: number;
+}> = ({ count = 36, operator = "align", primaryColor, accentColor, frame }) => {
+  const isAlign = operator === "align";
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 800 450" style={{ overflow: "visible" }}>
+      {/* Central focus guideline */}
+      {isAlign && (
+        <line
+          x1="100"
+          y1="225"
+          x2="700"
+          y2="225"
+          stroke={accentColor}
+          strokeWidth="2"
+          strokeDasharray="8,6"
+          opacity="0.6"
+        />
+      )}
+      {[...Array(count)].map((_, i) => {
+        const seedX = ((i * 127 + 53) % 650) + 75;
+        const seedY = ((i * 191 + 41) % 350) + 50;
+
+        // Attract toward center point (400, 225) or align onto horizontal beam (y=225)
+        const progress = Math.min(1, Math.max(0, frame / 30));
+        const targetY = isAlign ? 225 + (Math.sin(frame * 0.1 + i) * 12) : 225;
+        const targetX = isAlign ? seedX : 400 + Math.cos(i * 0.5 + frame * 0.05) * 120;
+
+        const currentX = interpolate(progress, [0, 1], [seedX, targetX]);
+        const currentY = interpolate(progress, [0, 1], [seedY, targetY]);
+        const isAccent = i % 4 === 0;
+
+        return (
+          <g key={i}>
+            <circle
+              cx={currentX}
+              cy={currentY}
+              r={isAccent ? 5 : 3.5}
+              fill={isAccent ? accentColor : primaryColor}
+              opacity={0.85}
+            />
+            {isAccent && (
+              <circle
+                cx={currentX}
+                cy={currentY}
+                r={10}
+                stroke={accentColor}
+                strokeWidth="1"
+                fill="none"
+                opacity={0.4}
+              />
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+/**
+ * 2. ConnectedGraph: operator="draw" | "cluster"
+ * Isolated nodes draw dynamic vector edges between each other.
+ */
+export const ConnectedGraph: React.FC<{
+  nodes?: number;
+  edges?: number;
+  operator?: string;
+  primaryColor: string;
+  accentColor: string;
+  frame: number;
+}> = ({ nodes = 8, primaryColor, accentColor, frame }) => {
+  const nodeCoords = [
+    { x: 180, y: 120, label: "01" },
+    { x: 380, y: 90, label: "02" },
+    { x: 580, y: 140, label: "03" },
+    { x: 680, y: 280, label: "04" },
+    { x: 480, y: 340, label: "05" },
+    { x: 260, y: 320, label: "06" },
+    { x: 390, y: 215, label: "HUB" },
+  ];
+
+  const edgePairs = [
+    [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0],
+    [6, 0], [6, 1], [6, 2], [6, 3], [6, 4], [6, 5]
+  ];
+
+  // Draw-in animation for edges
+  const drawProgress = Math.min(1, Math.max(0, frame / 20));
+
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 800 450">
+      {/* Connecting animated edges */}
+      {edgePairs.map(([fromIdx, toIdx], idx) => {
+        const from = nodeCoords[fromIdx];
+        const to = nodeCoords[toIdx];
+        const curToX = interpolate(drawProgress, [0, 1], [from.x, to.x]);
+        const curToY = interpolate(drawProgress, [0, 1], [from.y, to.y]);
+        const isHub = fromIdx === 6 || toIdx === 6;
+
+        return (
+          <line
+            key={idx}
+            x1={from.x}
+            y1={from.y}
+            x2={curToX}
+            y2={curToY}
+            stroke={isHub ? accentColor : primaryColor}
+            strokeWidth={isHub ? "3" : "1.8"}
+            strokeDasharray={isHub ? "none" : "6,4"}
+            opacity={0.7}
+          />
+        );
+      })}
+
+      {/* Nodes */}
+      {nodeCoords.map((n, idx) => {
+        const isHub = idx === 6;
+        return (
+          <g key={idx} transform={`translate(${n.x}, ${n.y})`}>
+            <circle
+              r={isHub ? 22 : 14}
+              fill={isHub ? accentColor : "#000000"}
+              stroke="#FFFFFF"
+              strokeWidth="2.5"
+            />
+            <text
+              textAnchor="middle"
+              dy="5"
+              fill={isHub ? "#000000" : "#FFFFFF"}
+              fontSize={isHub ? "12px" : "10px"}
+              fontWeight="900"
+              fontFamily="monospace"
+            >
+              {n.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+/**
+ * 3. VectorRibbon: flow="accelerate" | "expand"
+ * Tight geometric bottleneck expands as flowing ribbons accelerate through.
+ */
+export const VectorRibbon: React.FC<{
+  waveFreq?: number;
+  flow?: string;
+  primaryColor: string;
+  accentColor: string;
+  frame: number;
+}> = ({ waveFreq = 2.0, primaryColor, accentColor, frame }) => {
+  const speed = frame * 0.12;
+  const paths = [
+    { offset: 0, color: accentColor, width: 4 },
+    { offset: 25, color: primaryColor, width: 2.5 },
+    { offset: -25, color: primaryColor, width: 2 },
+  ];
+
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 800 450" style={{ overflow: "visible" }}>
+      {paths.map((p, idx) => {
+        const d = `M 60 ${225 + p.offset} Q 220 ${
+          225 + p.offset + Math.sin(speed + idx) * 75
+        }, 400 ${225 + p.offset} T 740 ${225 + p.offset}`;
+        return (
+          <path
+            key={idx}
+            d={d}
+            fill="none"
+            stroke={p.color}
+            strokeWidth={p.width}
+            opacity={0.85}
+          />
+        );
+      })}
+      {/* Bottleneck indicator frame */}
+      <rect
+        x="370"
+        y="160"
+        width="60"
+        height="130"
+        fill="none"
+        stroke={accentColor}
+        strokeWidth="2"
+        strokeDasharray="4,4"
+        opacity="0.5"
+      />
+    </svg>
+  );
+};
+
+/**
+ * 4. ConcentricContours: pulseRate={P} | "radiate"
+ * Acoustic and social resonance rings radiating outwards.
+ */
+export const ConcentricContours: React.FC<{
+  pulseRate?: number;
+  primaryColor: string;
+  accentColor: string;
+  frame: number;
+}> = ({ pulseRate = 1.6, primaryColor, accentColor, frame }) => {
+  const rings = [1, 2, 3, 4, 5];
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 800 450" style={{ overflow: "visible" }}>
+      <g transform="translate(400, 225)">
+        {rings.map((r) => {
+          const rBase = r * 35;
+          const dynamicR = rBase + ((frame * pulseRate * 2) % 40);
+          const opacity = Math.max(0.1, 1 - dynamicR / 220);
+          const isAccent = r % 2 === 1;
+
+          return (
+            <ellipse
+              key={r}
+              rx={dynamicR * 1.5}
+              ry={dynamicR * 0.9}
+              fill="none"
+              stroke={isAccent ? accentColor : primaryColor}
+              strokeWidth={isAccent ? "2.5" : "1.5"}
+              strokeDasharray={r === 3 ? "6,4" : "none"}
+              opacity={opacity}
+            />
+          );
+        })}
+        {/* Core focal pulse */}
+        <circle r="8" fill={accentColor} />
+      </g>
+    </svg>
+  );
+};
 
 export const AssetLayer: React.FC<AssetLayerProps> = ({
   spec,
   box,
   saliency,
   startFrame = 0,
+  durationInFrames = 45,
 }) => {
   const frame = useCurrentFrame();
   const relFrame = Math.max(0, frame - startFrame);
@@ -42,25 +286,30 @@ export const AssetLayer: React.FC<AssetLayerProps> = ({
     return null;
   }
 
-  const assetType = spec.asset_type || "search_console";
+  const geom = spec.geometry || spec.asset_type || "particle_field";
+  const operator = spec.operator || "align";
   const primary = spec.primary_color || "#FFFFFF";
   const accent = spec.accent_color || "#FF5500";
-  const label = spec.label || "KINETIC INTELLIGENCE";
+  const label = spec.label || "PERSISTENT KINETIC ENTITY";
 
-  // Spring entrance physics
-  const springVal = spring({
-    frame: relFrame,
-    fps: 30,
-    config: { damping: 12, mass: 0.6, stiffness: 150 },
-  });
+  // Directional whip exit & enter motion momentum:
+  // Enter: translateX from 100px -> 0
+  // Exit: translateX from 0 -> -100px
+  const isEntering = relFrame < 8;
+  const isExiting = relFrame > Math.max(1, durationInFrames - 8);
 
-  const baseScale = saliency?.asset_scale ?? 1.0;
-  const targetOpacity = saliency?.asset_opacity ?? 1.0;
-  const currentScale = interpolate(springVal, [0, 1], [0.88, baseScale]);
-  const currentOpacity = interpolate(relFrame, [0, 5], [0, targetOpacity], {
+  const enterX = interpolate(relFrame, [0, 8], [100, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
+  const exitX = interpolate(relFrame, [durationInFrames - 8, durationInFrames], [0, -100], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const currentX = isExiting ? exitX : isEntering ? enterX : 0;
+
+  const baseScale = saliency?.asset_scale ?? 1.0;
+  const targetOpacity = Math.max(0.7, saliency?.asset_opacity ?? 0.95);
 
   return (
     <div
@@ -70,8 +319,8 @@ export const AssetLayer: React.FC<AssetLayerProps> = ({
         top: `${box.y}px`,
         width: `${box.w}px`,
         height: `${box.h}px`,
-        opacity: currentOpacity,
-        transform: `scale(${currentScale})`,
+        opacity: targetOpacity,
+        transform: `translateX(${currentX}px) scale(${baseScale})`,
         transformOrigin: "center center",
         display: "flex",
         flexDirection: "column",
@@ -81,232 +330,67 @@ export const AssetLayer: React.FC<AssetLayerProps> = ({
         pointerEvents: "none",
       }}
     >
-      {/* 1. Tech: Generative Search Console */}
-      {assetType === "search_console" && (
-        <div
-          style={{
-            width: "88%",
-            backgroundColor: "#000000",
-            border: "3px solid #FFFFFF",
-            boxShadow: "10px 10px 0px 0px #FFFFFF",
-            padding: "24px 32px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <span style={{ width: "12px", height: "12px", borderRadius: "50%", backgroundColor: accent }} />
-              <span style={{ width: "12px", height: "12px", borderRadius: "50%", backgroundColor: "#FFFFFF" }} />
-              <span style={{ width: "12px", height: "12px", borderRadius: "50%", backgroundColor: "#555555" }} />
-            </div>
-            <span style={{ color: accent, fontSize: "12px", fontWeight: 800, fontFamily: "monospace" }}>
-              {label}
-            </span>
-          </div>
-          <div
-            style={{
-              backgroundColor: "#111111",
-              border: "1px solid #333333",
-              padding: "12px 18px",
-              color: "#FFFFFF",
-              fontFamily: "monospace",
-              fontSize: "18px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span style={{ color: accent }}>&gt;</span>
-            <span>{spec.svg_data?.query || "opportunity.reach(quality=high)"}</span>
-            <span style={{ opacity: relFrame % 15 < 8 ? 1 : 0, color: accent }}>_</span>
-          </div>
-        </div>
-      )}
+      {/* Procedural Entity Container Header */}
+      <div
+        style={{
+          width: "90%",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "12px",
+          borderBottom: `1px solid ${accent}44`,
+          paddingBottom: "6px",
+        }}
+      >
+        <span style={{ color: accent, fontSize: "12px", fontWeight: 900, fontFamily: "monospace" }}>
+          ✦ {spec.entity_id || "ENTITY_01"} // {operator.toUpperCase()}
+        </span>
+        <span style={{ color: primary, fontSize: "11px", fontWeight: 700, fontFamily: "monospace", opacity: 0.8 }}>
+          {label}
+        </span>
+      </div>
 
-      {/* 2. Tech: Interactive Node Graph */}
-      {assetType === "node_graph" && (
-        <div
-          style={{
-            width: "88%",
-            height: "75%",
-            backgroundColor: "#000000CC",
-            border: "2px solid #FFFFFF",
-            boxShadow: "8px 8px 0px 0px #000000",
-            position: "relative",
-            padding: "16px",
-          }}
-        >
-          <svg width="100%" height="100%" style={{ position: "absolute", inset: 0 }}>
-            {/* Connecting lines */}
-            <line x1="25%" y1="35%" x2="75%" y2="35%" stroke={primary} strokeWidth="2" strokeDasharray="4,4" />
-            <line x1="50%" y1="75%" x2="25%" y2="35%" stroke={accent} strokeWidth="2" />
-            <line x1="50%" y1="75%" x2="75%" y2="35%" stroke={accent} strokeWidth="2" />
-          </svg>
-          {/* Node 1 */}
-          <div
-            style={{
-              position: "absolute",
-              left: "20%",
-              top: "25%",
-              backgroundColor: accent,
-              color: "#000000",
-              fontWeight: 900,
-              fontSize: "14px",
-              padding: "8px 16px",
-              border: "2px solid #FFFFFF",
-            }}
-          >
-            ● CORE
-          </div>
-          {/* Node 2 */}
-          <div
-            style={{
-              position: "absolute",
-              left: "70%",
-              top: "25%",
-              backgroundColor: "#FFFFFF",
-              color: "#000000",
-              fontWeight: 900,
-              fontSize: "14px",
-              padding: "8px 16px",
-              border: "2px solid #000000",
-            }}
-          >
-            ◆ SYNC
-          </div>
-          {/* Node 3 */}
-          <div
-            style={{
-              position: "absolute",
-              left: "44%",
-              top: "65%",
-              backgroundColor: "#000000",
-              color: "#FFFFFF",
-              fontWeight: 900,
-              fontSize: "14px",
-              padding: "8px 16px",
-              border: `2px solid ${accent}`,
-            }}
-          >
-            ▲ NETWORK
-          </div>
-        </div>
-      )}
-
-      {/* 3. Poetry / Music: Organic Fluid Waveform */}
-      {assetType === "fluid_waveform" && (
-        <div style={{ width: "90%", height: "70%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="100%" height="160" viewBox="0 0 600 160">
-            <path
-              d={`M 0 80 Q 75 ${80 + Math.sin(relFrame * 0.15) * 45}, 150 80 T 300 80 T 450 80 T 600 80`}
-              fill="none"
-              stroke={accent}
-              strokeWidth="4"
-            />
-            <path
-              d={`M 0 80 Q 75 ${80 - Math.cos(relFrame * 0.12) * 35}, 150 80 T 300 80 T 450 80 T 600 80`}
-              fill="none"
-              stroke={primary}
-              strokeWidth="2.5"
-              strokeDasharray="6,4"
-              opacity="0.8"
-            />
-          </svg>
-        </div>
-      )}
-
-      {/* 4. Poetry / Music: Lunar Orbit */}
-      {assetType === "lunar_orbit" && (
-        <div style={{ position: "relative", width: "160px", height: "160px" }}>
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              border: `2px dashed ${accent}`,
-              borderRadius: "50%",
-              transform: `rotate(${relFrame * 1.5}deg)`,
-            }}
+      {/* 4 Procedural Generative Primitives */}
+      <div style={{ width: "95%", height: "82%", position: "relative" }}>
+        {geom === "particle_field" && (
+          <ParticleField
+            count={spec.params?.count || 36}
+            operator={operator}
+            primaryColor={primary}
+            accentColor={accent}
+            frame={relFrame}
           />
-          <div
-            style={{
-              position: "absolute",
-              inset: "25px",
-              backgroundColor: "#FFFFFF",
-              borderRadius: "50%",
-              boxShadow: `0 0 30px ${accent}`,
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              right: "-8px",
-              top: "50%",
-              width: "16px",
-              height: "16px",
-              backgroundColor: accent,
-              borderRadius: "50%",
-              border: "2px solid #000000",
-            }}
-          />
-        </div>
-      )}
+        )}
 
-      {/* 5. Finance / Business: Candlestick Chart */}
-      {assetType === "candlestick_chart" && (
-        <div
-          style={{
-            width: "85%",
-            height: "70%",
-            backgroundColor: "#000000DD",
-            border: "2px solid #FFFFFF",
-            boxShadow: "8px 8px 0px 0px #000000",
-            padding: "20px",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-around",
-          }}
-        >
-          {[45, 65, 55, 80, 70, 95].map((h, i) => {
-            const isUp = i % 2 === 0;
-            return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "12%" }}>
-                <div style={{ width: "2px", height: "18px", backgroundColor: isUp ? accent : primary }} />
-                <div
-                  style={{
-                    width: "100%",
-                    height: `${h}px`,
-                    backgroundColor: isUp ? accent : "#FFFFFF",
-                    border: "2px solid #000000",
-                  }}
-                />
-                <div style={{ width: "2px", height: "18px", backgroundColor: isUp ? accent : primary }} />
-              </div>
-            );
-          })}
-        </div>
-      )}
+        {geom === "connected_graph" && (
+          <ConnectedGraph
+            nodes={spec.params?.nodes || 7}
+            operator={operator}
+            primaryColor={primary}
+            accentColor={accent}
+            frame={relFrame}
+          />
+        )}
 
-      {/* 6. Finance / Business: Metric Dial */}
-      {assetType === "metric_dial" && (
-        <div
-          style={{
-            backgroundColor: "#FFFFFF",
-            border: "3px solid #000000",
-            boxShadow: "10px 10px 0px 0px #000000",
-            padding: "20px 36px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "8px",
-          }}
-        >
-          <span style={{ fontSize: "14px", fontWeight: 800, color: "#000000" }}>{label}</span>
-          <span style={{ fontSize: "52px", fontWeight: 900, color: accent, lineHeight: 1 }}>+42%</span>
-          <span style={{ fontSize: "13px", fontWeight: 700, color: "#555555" }}>● OUTPERFORMING MEDIAN</span>
-        </div>
-      )}
+        {geom === "vector_ribbon" && (
+          <VectorRibbon
+            waveFreq={spec.params?.wave_freq || 2.0}
+            flow={operator}
+            primaryColor={primary}
+            accentColor={accent}
+            frame={relFrame}
+          />
+        )}
+
+        {geom === "concentric_contours" && (
+          <ConcentricContours
+            pulseRate={spec.params?.pulse_rate || 1.6}
+            primaryColor={primary}
+            accentColor={accent}
+            frame={relFrame}
+          />
+        )}
+      </div>
     </div>
   );
 };

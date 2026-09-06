@@ -21,35 +21,34 @@ class TestNegotiatedCompiler(unittest.TestCase):
             world="editorial"
         )
 
-    def test_spatial_director_saliency_and_bounding_boxes(self):
-        """Verify Spatial Director allocates bounding boxes and saliency budget."""
+    def test_spatial_director_dual_box_contract_bans_zero_opacity(self):
+        """Verify Spatial Director strictly enforces dual-box layout and bans zero opacity."""
         type_prop = {"text": "فرصت‌های شغلی برتر", "is_hero": True}
-        asset_prop = {"asset_type": "search_console"}
+        asset_prop = {"geometry": "connected_graph"}
 
-        # Scene 1: Asset Dominant
-        alloc_asset = SpatialDirectorEngine.allocate(type_prop, asset_prop, scene_idx=1, total_scenes=5, is_music=False)
-        self.assertEqual(alloc_asset.hero_layer, "asset")
-        self.assertEqual(alloc_asset.archetype, "asset_dominant")
-        self.assertEqual(alloc_asset.asset_opacity, 1.0)
-        self.assertLess(alloc_asset.type_scale, 1.0)  # Saliency budget scaling
-        self.assertGreater(alloc_asset.asset_box.h, 500)
-        self.assertGreater(alloc_asset.type_box.h, 200)
+        # Scene 0: split_horizontal
+        alloc_h = SpatialDirectorEngine.allocate(type_prop, asset_prop, scene_idx=0, total_scenes=5, is_music=False)
+        self.assertEqual(alloc_h.archetype, "split_horizontal")
+        self.assertGreater(alloc_h.asset_box.w, 0)
+        self.assertGreater(alloc_h.asset_box.h, 0)
+        self.assertGreater(alloc_h.type_box.w, 0)
+        self.assertGreater(alloc_h.type_box.h, 0)
+        self.assertGreaterEqual(alloc_h.asset_opacity, 0.70)
+        self.assertEqual(alloc_h.type_box.y, 80)
+        self.assertEqual(alloc_h.type_box.h, 420)
+        self.assertEqual(alloc_h.asset_box.y, 540)
+        self.assertEqual(alloc_h.asset_box.h, 460)
 
-        # Scene 0: Typography Dominant
-        alloc_type = SpatialDirectorEngine.allocate(type_prop, asset_prop, scene_idx=0, total_scenes=5, is_music=False)
-        self.assertEqual(alloc_type.hero_layer, "typography")
-        self.assertEqual(alloc_type.archetype, "typography_dominant")
-        self.assertEqual(alloc_type.type_opacity, 1.0)
-        self.assertEqual(alloc_type.asset_opacity, 0.0)
-
-    def test_conflict_firewall_resolution(self):
-        """Firewall shifts asset-dominant scene to split_contrast when text is long."""
-        long_text_prop = {"text": "یک متن بسیار طولانی برای تست فایروال عدم تداخل محتوا", "is_hero": True}
-        asset_prop = {"asset_type": "node_graph"}
-
-        alloc = SpatialDirectorEngine.allocate(long_text_prop, asset_prop, scene_idx=1, total_scenes=5, is_music=False)
-        self.assertEqual(alloc.archetype, "split_contrast")
-        self.assertEqual(alloc.hero_layer, "typography")
+        # Scene 1: split_vertical
+        alloc_v = SpatialDirectorEngine.allocate(type_prop, asset_prop, scene_idx=1, total_scenes=5, is_music=False)
+        self.assertEqual(alloc_v.archetype, "split_vertical")
+        self.assertGreater(alloc_v.asset_box.w, 0)
+        self.assertGreater(alloc_v.asset_box.h, 0)
+        self.assertGreaterEqual(alloc_v.asset_opacity, 0.70)
+        self.assertEqual(alloc_v.type_box.x, 520)
+        self.assertEqual(alloc_v.type_box.w, 500)
+        self.assertEqual(alloc_v.asset_box.x, 60)
+        self.assertEqual(alloc_v.asset_box.w, 440)
 
     def test_environment_engine_saliency_contrast(self):
         """Verify Environment never outputs flat solid hex and respects saliency contrast."""
@@ -59,16 +58,18 @@ class TestNegotiatedCompiler(unittest.TestCase):
         self.assertLessEqual(env.contrast, 0.35)
         self.assertTrue(len(env.gradient_stops) >= 3)
 
-    def test_asset_engine_topic_generation(self):
-        """Verify Asset Engine generates topic-specific metaphors without generic bento icons."""
+    def test_asset_engine_procedural_visual_grammar(self):
+        """Verify Asset Engine generates procedural geometries and operators."""
         # Tech topic
         tech_asset = AssetEngine.propose("برنامه‌نویسی سیستم و سرور", "tech_career", self.palette, scene_idx=0)
-        self.assertIn(tech_asset.asset_type, ["search_console", "node_graph", "credential_badge"])
-        self.assertIsNotNone(tech_asset.label)
+        self.assertIn(tech_asset.geometry, ["connected_graph", "particle_field", "vector_ribbon"])
+        self.assertIn(tech_asset.operator, ["draw", "cluster", "align", "attract", "expand"])
+        self.assertIsNotNone(tech_asset.entity_id)
 
         # Poetry topic
         poetry_asset = AssetEngine.propose("آواز و ترانه شبانه", "poetry_music", self.palette, scene_idx=0)
-        self.assertIn(poetry_asset.asset_type, ["fluid_waveform", "lunar_orbit", "kinetic_rings"])
+        self.assertIn(poetry_asset.geometry, ["vector_ribbon", "concentric_contours", "particle_field"])
+        self.assertIn(poetry_asset.operator, ["flow", "accelerate", "radiate", "attract"])
 
     def test_type_engine_mode_switching_and_spring_physics(self):
         """Verify Type Engine selects appropriate font size and spring config."""

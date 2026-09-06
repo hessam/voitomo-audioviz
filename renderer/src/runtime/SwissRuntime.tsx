@@ -7,6 +7,9 @@ import { CaptionPanel } from "./primitives/layouts/CaptionPanel";
 import { PersianText } from "./primitives/PersianText";
 import { TapeStrip } from "./primitives/TapeStrip";
 import { BentoMatrix, GraphicTile } from "./primitives/BentoMatrix";
+import { EnvironmentLayer } from "./primitives/EnvironmentLayer";
+import { AssetLayer } from "./primitives/AssetLayer";
+import { TypographyLayer } from "./primitives/TypographyLayer";
 
 export interface LayerNodeInput {
   id: string;
@@ -76,6 +79,14 @@ export interface CreativeSpecInput {
       layers?: LayerNodeInput[];
       camera_dynamic?: string;
       motion?: Record<string, any>;
+      spatial?: Record<string, any>;
+      environment?: any;
+      asset?: any;
+      assetBox?: { x: number; y: number; w: number; h: number };
+      type?: any;
+      type_spec?: any;
+      typeBox?: { x: number; y: number; w: number; h: number };
+      hero_layer?: string;
     }>;
   };
 }
@@ -246,6 +257,10 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
   // 3. pop-bento: Commercial / Ad / Promo (dynamic variable benefit tiles, CTA takeovers, punchy BentoMatrix)
   const world = creativeSpec?.creative_dna?.world || "pop-bento";
 
+  const isNegotiatedCompilerScene = Boolean(
+    activeScene?.spatial || activeScene?.environment || activeScene?.asset || activeScene?.type
+  );
+
   return (
     <div
       style={{
@@ -259,43 +274,68 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
     >
       {audioSrc && <Audio src={audioSrc} />}
 
-      {world === "kinetic-poster" && (
-        <KineticPosterWorld
-          scene={activeScene}
-          stackedScenes={stackedScenes}
-          fontFamily={fontFamily}
-          totalFrames={totalFrames}
-        />
-      )}
+      {/* 4-Engine Negotiated Compiler Render Tree (Astra Architectural Contract) */}
+      {isNegotiatedCompilerScene ? (
+        <>
+          <EnvironmentLayer
+            spec={activeScene?.environment}
+            defaultBg={ds.palette.bg}
+          />
+          <AssetLayer
+            spec={activeScene?.asset}
+            box={activeScene?.assetBox || activeScene?.spatial?.asset_box}
+            saliency={activeScene?.spatial}
+            startFrame={startFrame}
+          />
+          <TypographyLayer
+            spec={activeScene?.type || activeScene?.type_spec}
+            box={activeScene?.typeBox || activeScene?.spatial?.type_box}
+            saliency={activeScene?.spatial}
+            stackedScenes={stackedScenes}
+            fontFamily={fontFamily}
+          />
+        </>
+      ) : (
+        <>
+          {world === "kinetic-poster" && (
+            <KineticPosterWorld
+              scene={activeScene}
+              stackedScenes={stackedScenes}
+              fontFamily={fontFamily}
+              totalFrames={totalFrames}
+            />
+          )}
 
-      {world === "editorial" && (
-        <EditorialWorld
-          scene={activeScene}
-          stackedScenes={stackedScenes}
-          activeSceneIdx={activeSceneIdx}
-          scenesCount={scenes.length}
-          totalFrames={totalFrames}
-          frame={frame}
-          fontFamily={fontFamily}
-          ds={ds}
-          creativeSpec={creativeSpec}
-        />
-      )}
+          {world === "editorial" && (
+            <EditorialWorld
+              scene={activeScene}
+              stackedScenes={stackedScenes}
+              activeSceneIdx={activeSceneIdx}
+              scenesCount={scenes.length}
+              totalFrames={totalFrames}
+              frame={frame}
+              fontFamily={fontFamily}
+              ds={ds}
+              creativeSpec={creativeSpec}
+            />
+          )}
 
-      {world === "pop-bento" && (
-        <PopBentoWorld
-          scene={activeScene}
-          stackedScenes={stackedScenes}
-          activeSceneIdx={activeSceneIdx}
-          scenesCount={scenes.length}
-          totalFrames={totalFrames}
-          frame={frame}
-          fontFamily={fontFamily}
-          ds={ds}
-          showBento={showBento}
-          cameraTransform={cameraTransform}
-          creativeSpec={creativeSpec}
-        />
+          {world === "pop-bento" && (
+            <PopBentoWorld
+              scene={activeScene}
+              stackedScenes={stackedScenes}
+              activeSceneIdx={activeSceneIdx}
+              scenesCount={scenes.length}
+              totalFrames={totalFrames}
+              frame={frame}
+              fontFamily={fontFamily}
+              ds={ds}
+              showBento={showBento}
+              cameraTransform={cameraTransform}
+              creativeSpec={creativeSpec}
+            />
+          )}
+        </>
       )}
     </div>
   );

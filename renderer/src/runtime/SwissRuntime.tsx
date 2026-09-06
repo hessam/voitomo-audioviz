@@ -230,7 +230,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
   // Accumulating Multi-Line Tape Strips
   // Stacks 1 to 3 phrases sequentially before clearing, matching Canva/Cavalry kinetic flow
   const cycleIdx = activeSceneIdx % 3; // 0, 1, 2
-  const showBento = (cycleIdx === 2) || (activeSceneIdx === scenes.length - 1) || activeScene?.layout === "bento_grid";
+  const showBento = activeScene?.layout === "bento_grid";
 
   const stackedScenes: Array<{ scene: (typeof scenes)[0]; isCurrent: boolean }> = [];
   for (let offset = cycleIdx; offset >= 0; offset--) {
@@ -574,6 +574,7 @@ export const PopBentoWorld: React.FC<{
     "پیشنهاد ویژه"
   );
   const isFinalScene = activeSceneIdx === (scenesCount || 1) - 1;
+  const isBento = scene?.layout === "bento_grid";
 
   return (
     <div
@@ -590,10 +591,10 @@ export const PopBentoWorld: React.FC<{
       <div
         style={{
           position: "absolute",
-          top: showBento ? "40px" : "15%",
+          top: isBento ? "40px" : "18%",
           left: "5%",
           right: "5%",
-          height: showBento ? "46%" : "64%",
+          height: isBento ? "46%" : "64%",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
@@ -648,8 +649,8 @@ export const PopBentoWorld: React.FC<{
         })}
       </div>
 
-      {/* Lower 50%: Dynamic Bento Matrix OR Final CTA Takeover */}
-      {showBento && (
+      {/* Lower 50%: Dynamic Bento Matrix (Strictly ONLY if scene.layout === 'bento_grid') */}
+      {isBento && (
         <div style={{ position: "absolute", inset: "52% 5% 6% 5%", zIndex: 5 }}>
           {isFinalScene ? (
             <div

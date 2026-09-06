@@ -211,6 +211,51 @@ class TestVoitomoV2Engine(unittest.TestCase):
         spec_ed = direct_creative_spec(ed_words, fps=30, duration_sec=2.0)
         self.assertEqual(spec_ed.creative_dna.world, "editorial")
 
+    def test_derive_phrase_layout_and_no_modulo_cycling(self):
+        """Verify layout branches by phrase meaning and audio type without modulo cycling."""
+        from bot.services.director import derive_phrase_layout, build_kinetic_phrase_scenes
+        from contracts.creative_spec import CreativeDNA, Palette
+
+        # 1. Music is ALWAYS kinetic_poster, bans bento_grid
+        self.assertEqual(derive_phrase_layout("هر چه خواهی کن ولی تنهایم مگذار", is_music=True), "kinetic_poster")
+        self.assertEqual(derive_phrase_layout("رشد ۱۰۰ درصدی در کسب و کار", is_music=True), "kinetic_poster")
+
+        # 2. Educational: numbers -> metric_punch
+        self.assertEqual(derive_phrase_layout("فروش ۲۰۰ میلیونی در یک ماه", is_music=False), "metric_punch")
+        self.assertEqual(derive_phrase_layout("رشد ۳۰ درصد بازدهی", is_music=False), "metric_punch")
+
+        # 3. Educational: questions -> hero_focus
+        self.assertEqual(derive_phrase_layout("چرا باید سیستم بسازیم؟", is_music=False), "hero_focus")
+        self.assertEqual(derive_phrase_layout("کجا سرمایه‌گذاری کنیم", is_music=False), "hero_focus")
+
+        # 4. Educational: item listing -> split_viewport
+        self.assertEqual(derive_phrase_layout("چه بزرگ چه کوچک باید شروع کرد", is_music=False), "split_viewport")
+        self.assertEqual(derive_phrase_layout("مسیر اول یا دوم", is_music=False), "split_viewport")
+
+        # 5. Educational: default -> statement_stack
+        self.assertEqual(derive_phrase_layout("طراحی هویت بصری مدرن", is_music=False), "statement_stack")
+
+        # 6. build_kinetic_phrase_scenes with music input: 100% kinetic_poster
+        music_dna = CreativeDNA(
+            thesis="ترانه شب",
+            emotional_contradiction="شور",
+            metaphor_system="آهنگ",
+            transformation_verbs=["compress"],
+            palette=Palette(bg="#5537ED", fg="#FFFFFF", accent="#D4FF00", muted="#E0E7FF"),
+            world="kinetic-poster"
+        )
+        words = [
+            {"word": "در", "start": 0.0, "end": 0.4},
+            {"word": "هوایت", "start": 0.5, "end": 0.9},
+            {"word": "بی‌قرارم", "start": 1.0, "end": 1.6},
+            {"word": "روز", "start": 1.8, "end": 2.2},
+            {"word": "و", "start": 2.3, "end": 2.5},
+            {"word": "شب", "start": 2.6, "end": 3.0}
+        ]
+        music_scenes = build_kinetic_phrase_scenes(words, total_frames=90, fps=30, creative_dna=music_dna)
+        self.assertTrue(all(s.layout == "kinetic_poster" for s in music_scenes))
+        self.assertFalse(any(s.layout == "bento_grid" for s in music_scenes))
+
 if __name__ == "__main__":
     unittest.main()
 

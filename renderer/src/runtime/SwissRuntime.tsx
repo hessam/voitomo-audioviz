@@ -191,7 +191,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
   // Design system with procedural harmonic palette
   const ds = creativeSpec?.design_system ?? {
     concept: creativeSpec?.creative_dna?.metaphor_system || "Architectural Kinetic Specimen",
-    palette: creativeSpec?.creative_dna?.palette || { bg: "#1C1412", fg: "#F7F1ED", accent: "#E05638", muted: "#8C7D75" },
+    palette: creativeSpec?.creative_dna?.palette || { bg: "#5537ED", fg: "#FFFFFF", accent: "#D4FF00", muted: "#E0E7FF" },
     type_scale: { family: creativeSpec?.creative_dna?.font_family || "Dana, Vazirmatn, sans-serif", weights: ["300", "500", "700", "900"], ratio: 1.333 },
     grid: { alignment: "center", margin: 80, columns: 12 },
   };

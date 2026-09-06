@@ -791,7 +791,10 @@ def build_kinetic_phrase_scenes(
     # Visual world and palette setup for 4-engine negotiation
     world = getattr(creative_dna, "world", "editorial") if creative_dna else "editorial"
     palette = getattr(creative_dna, "palette", None) or SAFE_PALETTES["electric_cobalt"]
-    topic = AssetEngine.detect_topic(full_transcript or "سوئیس", world=world)
+
+    # Astra Causal Metaphor Compiler: Batch compile relational VectorIRAssembly for all phrases
+    phrase_list = [clean_line_typography(" ".join(w.get("word", "") for w in c)) for c in chunks]
+    compiled_assemblies = AssetEngine.query_llm_causal_metaphors(phrase_list, creative_dna)
 
     for idx, c in enumerate(chunks):
         f_start = bounds[idx]
@@ -815,12 +818,14 @@ def build_kinetic_phrase_scenes(
             is_music=is_music
         )
 
-        # 2. Metaphor Asset Engine proposal:
+        # 2. Causal Metaphor Asset Engine proposal (VectorIRAssembly):
         asset_proposal = AssetEngine.propose(
             phrase_text=cleaned_text,
-            topic=topic,
             palette=palette,
-            scene_idx=idx
+            scene_idx=idx,
+            total_scenes=len(chunks),
+            creative_dna=creative_dna,
+            compiled_assemblies=compiled_assemblies
         )
 
         # 3. Spatial Director Engine: Negotiate Canvas & Saliency Budget

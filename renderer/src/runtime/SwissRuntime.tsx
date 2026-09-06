@@ -34,6 +34,7 @@ export interface CreativeSpecInput {
     transformation_verbs?: string[];
     palette?: { bg: string; fg: string; accent: string; muted: string };
     font_family?: string;
+    world?: "kinetic-poster" | "editorial" | "pop-bento";
   };
   design_system: {
     concept?: string;
@@ -239,64 +240,11 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
     }
   }
 
-  const renderLayout = () => {
-    if (!activeScene) return null;
-
-    const currentBadge = clampBadge(activeScene.badge || activeScene.layers?.find(l => l.type === "kinetic_badge")?.text);
-
-    return (
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "8px",
-          direction: "rtl",
-        }}
-      >
-        {/* Kinetic Badge */}
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "4px 16px",
-            backgroundColor: "#000000",
-            color: "#FFFFFF",
-            boxShadow: "4px 4px 0px 0px #000000",
-            fontSize: "15px",
-            fontWeight: 800,
-            fontFamily,
-            marginBottom: "6px",
-          }}
-        >
-          <span>✦</span>
-          <span>{currentBadge}</span>
-        </div>
-
-        {/* Stacked Chunky Tape Strips */}
-        {stackedScenes.map(({ scene, isCurrent }) => {
-          const sText = scene.layers?.find(l => l.is_hero || l.weight === "900")?.text || scene.content?.find(c => c.is_hero)?.text || scene.content?.[0]?.text || "";
-          if (!sText) return null;
-          const sStart = scene.frame_range[0];
-          const baseSize = stackedScenes.length > 2 ? 42 : (stackedScenes.length === 2 ? 50 : 58);
-          const fontSize = sText.length > 25 ? baseSize - 6 : baseSize;
-
-          return (
-            <TapeStrip
-              key={scene.id}
-              text={sText}
-              isBlack={!isCurrent}
-              fontSize={fontSize}
-              fontFamily={fontFamily}
-              startFrame={sStart}
-            />
-          );
-        })}
-      </div>
-    );
-  };
+  // Polymorphic Visual Worlds Contract:
+  // 1. kinetic-poster: Music / Lyric / Poetry (75-110px stacked verses, zero HUD, zero bento)
+  // 2. editorial: Education / Tutorial / LinkedIn (balanced 55px typography, step cards, minimal subtitle HUD)
+  // 3. pop-bento: Commercial / Ad / Promo (dynamic variable benefit tiles, CTA takeovers, punchy BentoMatrix)
+  const world = creativeSpec?.creative_dna?.world || "pop-bento";
 
   return (
     <div
@@ -311,160 +259,437 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
     >
       {audioSrc && <Audio src={audioSrc} />}
 
-      {/* Swiss Architectural Outer Margin Grid Box */}
-      <div
-        style={{
-          position: "absolute",
-          top: `${margin - 24}px`,
-          bottom: `${margin - 24}px`,
-          left: `${margin - 24}px`,
-          right: `${margin - 24}px`,
-          border: `1px solid ${ds.palette.fg}10`,
-          pointerEvents: "none",
-          zIndex: 10,
-        }}
-      >
-        {/* Sleek corner registration ticks */}
-        <span style={{ position: "absolute", top: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", top: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", bottom: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", bottom: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.4, fontFamily: "monospace" }}>+</span>
-      </div>
+      {world === "kinetic-poster" && (
+        <KineticPosterWorld
+          scene={activeScene}
+          stackedScenes={stackedScenes}
+          fontFamily={fontFamily}
+          totalFrames={totalFrames}
+        />
+      )}
 
-      {/* Top Technical Header HUD (Silenced) */}
+      {world === "editorial" && (
+        <EditorialWorld
+          scene={activeScene}
+          stackedScenes={stackedScenes}
+          activeSceneIdx={activeSceneIdx}
+          scenesCount={scenes.length}
+          totalFrames={totalFrames}
+          frame={frame}
+          fontFamily={fontFamily}
+          ds={ds}
+          creativeSpec={creativeSpec}
+        />
+      )}
+
+      {world === "pop-bento" && (
+        <PopBentoWorld
+          scene={activeScene}
+          stackedScenes={stackedScenes}
+          activeSceneIdx={activeSceneIdx}
+          scenesCount={scenes.length}
+          totalFrames={totalFrames}
+          frame={frame}
+          fontFamily={fontFamily}
+          ds={ds}
+          showBento={showBento}
+          cameraTransform={cameraTransform}
+          creativeSpec={creativeSpec}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * Visual World 1: Kinetic Poster (Music / Lyric / Poetry)
+ * Strict Bans: BANNED: Tech HUD, Bento grids, audio meters, frame ticks.
+ * What is rendered: Full-canvas typography (75–110px), stacked verses, phrase-reveal motion.
+ */
+export const KineticPosterWorld: React.FC<{
+  scene?: any;
+  stackedScenes: Array<{ scene: any; isCurrent: boolean }>;
+  fontFamily: string;
+  totalFrames: number;
+}> = ({ stackedScenes, fontFamily }) => {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "40px 24px",
+        direction: "rtl",
+        zIndex: 10,
+      }}
+    >
+      {stackedScenes.map(({ scene: s, isCurrent }) => {
+        const sText =
+          s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+          s.content?.find((c: any) => c.is_hero)?.text ||
+          s.content?.[0]?.text ||
+          "";
+        if (!sText) return null;
+        const sStart = s.frame_range[0];
+
+        // 75-110px typographic scaling based on stack depth and phrase length
+        const baseSize =
+          stackedScenes.length > 2 ? 76 : stackedScenes.length === 2 ? 88 : 104;
+        const fontSize = sText.length > 24 ? baseSize - 12 : baseSize;
+
+        return (
+          <TapeStrip
+            key={s.id}
+            text={sText}
+            isBlack={!isCurrent}
+            fontSize={fontSize}
+            fontFamily={fontFamily}
+            startFrame={sStart}
+            style={{ margin: "10px 0" }}
+          />
+        );
+      })}
+    </div>
+  );
+};
+
+/**
+ * Visual World 2: Editorial (Education / Tutorial / LinkedIn)
+ * Strict Bans: BANNED: 8-tile bento icon matrix, full-bleed poster scaling.
+ * What is rendered: Chapter cards, step badges, annotated comparisons, balanced 55px typography, minimal subtitle HUD.
+ */
+export const EditorialWorld: React.FC<{
+  scene?: any;
+  stackedScenes: Array<{ scene: any; isCurrent: boolean }>;
+  activeSceneIdx: number;
+  scenesCount: number;
+  totalFrames: number;
+  frame: number;
+  fontFamily: string;
+  ds: any;
+  creativeSpec?: CreativeSpecInput;
+}> = ({
+  scene,
+  stackedScenes,
+  activeSceneIdx,
+  scenesCount,
+  totalFrames,
+  frame,
+  fontFamily,
+  ds,
+  creativeSpec,
+}) => {
+  const currentBadge = clampBadge(
+    scene?.badge || scene?.layers?.find((l: any) => l.type === "kinetic_badge")?.text,
+    "آموزش و بررسی"
+  );
+  const progressRatio = Math.min(1, Math.max(0, frame / (totalFrames || 1)));
+
+  // Extract structured points or comparison cards
+  const points = scene?.layers?.filter((l: any) => !l.is_hero && l.text) || [];
+  const displayItems =
+    points.length > 0
+      ? points.slice(0, 2)
+      : [
+          { text: creativeSpec?.creative_dna?.thesis || "تحلیل ساختار و بهینه‌سازی فرآیند", weight: "700" },
+          { text: creativeSpec?.creative_dna?.emotional_contradiction || "تعادل میان دقت اجرایی و سرعت", weight: "500" },
+        ];
+
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", fontFamily }}>
+      {/* Minimal Subtitle HUD Header */}
       <div
         style={{
           position: "absolute",
           top: "28px",
-          left: `${margin}px`,
-          right: `${margin}px`,
+          left: "48px",
+          right: "48px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          fontSize: 13,
+          fontSize: "14px",
           fontFamily: "monospace, sans-serif",
           color: ds.palette.muted,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-          opacity: 0.28,
+          opacity: 0.75,
           zIndex: 20,
         }}
       >
-        {/* Concept / Taxonomy */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ color: ds.palette.accent, fontWeight: 900 }}>SWISS //</span>
-          <span style={{ color: ds.palette.fg, opacity: 0.75 }}>
-            {clampBadge(creativeSpec?.creative_dna?.thesis, "KINETIC SPECIMEN")}
-          </span>
+          <span style={{ color: ds.palette.accent, fontWeight: 900 }}>LESSON //</span>
+          <span style={{ color: ds.palette.fg, opacity: 0.9 }}>{currentBadge}</span>
         </div>
-
-        {/* Scene Index Stamp: 01 // 05 */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 700 }}>
-          <span style={{ color: ds.palette.fg }}>
-            SCENE [{String(activeSceneIdx + 1).padStart(2, "0")}/{String(scenes.length || 1).padStart(2, "0")}]
-          </span>
-          <span style={{ color: ds.palette.accent }}>
-            // {activeScene?.layout?.toUpperCase().replace("_", " ") || "HERO"}
-          </span>
-        </div>
-
-        {/* Font Specimen Tag */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <span>{fontFamily.split(",")[0].trim().toUpperCase()}</span>
-          <span style={{ opacity: 0.35 }}>|</span>
-          <span>[1080×1080]</span>
+        <div style={{ fontWeight: 700, color: ds.palette.fg }}>
+          STEP [{String(activeSceneIdx + 1).padStart(2, "0")}/{String(scenesCount || 1).padStart(2, "0")}]
         </div>
       </div>
 
-      {/* Dynamic Motion Viewport with Camera Dynamic Transforms */}
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          position: "relative",
-          zIndex: 5,
-          transform: cameraTransform,
-          transition: "transform 0.05s linear",
-        }}
-      >
-        {/* Kinetic Typographic Stage (Upper 46% if Bento active, centered 64% otherwise) */}
-        <div
-          style={{
-            position: "absolute",
-            top: showBento ? "65px" : "18%",
-            left: "5%",
-            right: "5%",
-            height: showBento ? "46%" : "64%",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            textAlign: "center",
-            zIndex: 10,
-            transition: "all 0.15s ease",
-          }}
-        >
-          {renderLayout()}
-        </div>
-
-        {/* Lower Canvas Geometric Bento Matrix (Anchors every 3rd phrase & summary moments) */}
-        {showBento && (
-          <BentoMatrix style={{ position: "absolute", inset: "54% 5% 6% 5%", zIndex: 5 }} />
-        )}
-      </div>
-
-      {/* Bottom Technical Footer HUD (Silenced) */}
+      {/* Upper 40%: Balanced 55px Typography */}
       <div
         style={{
           position: "absolute",
-          bottom: "26px",
-          left: `${margin}px`,
-          right: `${margin}px`,
+          top: "70px",
+          left: "48px",
+          right: "48px",
+          height: "38%",
           display: "flex",
-          justifyContent: "space-between",
+          flexDirection: "column",
+          justifyContent: "center",
           alignItems: "center",
-          fontSize: 13,
-          fontFamily: "monospace, sans-serif",
-          color: ds.palette.muted,
-          letterSpacing: "0.06em",
-          opacity: 0.28,
+          textAlign: "center",
+          direction: "rtl",
+          zIndex: 10,
+        }}
+      >
+        {stackedScenes.slice(-2).map(({ scene: s, isCurrent }) => {
+          const sText =
+            s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+            s.content?.find((c: any) => c.is_hero)?.text ||
+            s.content?.[0]?.text ||
+            "";
+          if (!sText) return null;
+          const sStart = s.frame_range[0];
+          const fontSize = sText.length > 25 ? 48 : 55;
+
+          return (
+            <TapeStrip
+              key={s.id}
+              text={sText}
+              isBlack={!isCurrent}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
+              startFrame={sStart}
+            />
+          );
+        })}
+      </div>
+
+      {/* Lower 50%: Clean Step Cards & Annotated Comparisons */}
+      <div
+        style={{
+          position: "absolute",
+          top: "48%",
+          bottom: "40px",
+          left: "48px",
+          right: "48px",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          gap: "16px",
+          direction: "rtl",
+          zIndex: 10,
+        }}
+      >
+        {displayItems.map((item: any, idx: number) => (
+          <div
+            key={idx}
+            style={{
+              backgroundColor: "#FFFFFF",
+              color: "#000000",
+              border: "2px solid #000000",
+              boxShadow: "6px 6px 0px 0px #000000",
+              padding: "18px 24px",
+              display: "flex",
+              alignItems: "center",
+              gap: "16px",
+            }}
+          >
+            <span
+              style={{
+                backgroundColor: ds.palette.accent,
+                color: "#000000",
+                fontSize: "14px",
+                fontWeight: 900,
+                padding: "4px 10px",
+                border: "1px solid #000000",
+                boxShadow: "2px 2px 0px 0px #000000",
+                fontFamily: "monospace",
+              }}
+            >
+              0{idx + 1}
+            </span>
+            <span style={{ fontSize: "22px", fontWeight: 700, color: "#000000" }}>
+              {item.text}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Minimal Subtitle HUD Progress Bar */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: "4px",
+          backgroundColor: `${ds.palette.fg}22`,
           zIndex: 20,
         }}
       >
-        {/* Dynamic Motion Readout */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ color: ds.palette.accent, fontWeight: 900 }}>MOTION:</span>
-          <span style={{ color: ds.palette.fg, opacity: 0.85 }}>
-            {cameraDynamic.toUpperCase()} // {activeScene?.layers?.[0]?.action_verb?.toUpperCase() || "REVEAL"}
-          </span>
-        </div>
-
-        {/* Kinetic Bottom Audio Waveform/Tick Scrubber */}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "15px" }}>
-          {[35, 70, 25, 90, 50, 85, 30, 95, 60, 40, 80, 20, 75, 45, 65, 35, 80, 50].map((h, i) => {
-            const dynamicH = Math.max(15, Math.min(100, h + Math.sin((frame + i * 4) * 0.35) * 35));
-            return (
-              <span
-                key={i}
-                style={{
-                  width: "2px",
-                  height: `${dynamicH}%`,
-                  backgroundColor: i % 4 === 0 ? ds.palette.accent : `${ds.palette.fg}44`,
-                  display: "inline-block",
-                  transition: "height 0.08s ease",
-                }}
-              />
-            );
-          })}
-        </div>
-
-        {/* Frame Readout */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span>FRM: {String(frame).padStart(4, "0")} / {String(totalFrames).padStart(4, "0")}</span>
-          <span style={{ color: ds.palette.accent }}>[30 FPS]</span>
-        </div>
+        <div
+          style={{
+            height: "100%",
+            width: `${progressRatio * 100}%`,
+            backgroundColor: ds.palette.accent,
+            transition: "width 0.1s linear",
+          }}
+        />
       </div>
+    </div>
+  );
+};
+
+/**
+ * Visual World 3: Pop Bento (Commercial / Ad / Promo)
+ * Strict Bans: BANNED: Static 4-slot wireframe, identical 8-icon grids.
+ * What is rendered: Dynamic variable product/benefit tiles, price bursts, punchy CTA takeovers + BentoMatrix.
+ */
+export const PopBentoWorld: React.FC<{
+  scene?: any;
+  stackedScenes: Array<{ scene: any; isCurrent: boolean }>;
+  activeSceneIdx: number;
+  scenesCount: number;
+  totalFrames: number;
+  frame: number;
+  fontFamily: string;
+  ds: any;
+  showBento: boolean;
+  cameraTransform?: string;
+  creativeSpec?: CreativeSpecInput;
+}> = ({
+  scene,
+  stackedScenes,
+  activeSceneIdx,
+  scenesCount,
+  fontFamily,
+  ds,
+  showBento,
+  cameraTransform = "none",
+}) => {
+  const currentBadge = clampBadge(
+    scene?.badge || scene?.layers?.find((l: any) => l.type === "kinetic_badge")?.text,
+    "پیشنهاد ویژه"
+  );
+  const isFinalScene = activeSceneIdx === (scenesCount || 1) - 1;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        overflow: "hidden",
+        fontFamily,
+        transform: cameraTransform,
+        transition: "transform 0.05s linear",
+      }}
+    >
+      {/* Upper 46%: Punchy Headline & Kinetic Badge */}
+      <div
+        style={{
+          position: "absolute",
+          top: showBento ? "40px" : "15%",
+          left: "5%",
+          right: "5%",
+          height: showBento ? "46%" : "64%",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          textAlign: "center",
+          direction: "rtl",
+          zIndex: 10,
+          transition: "all 0.15s ease",
+        }}
+      >
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "4px 16px",
+            backgroundColor: "#000000",
+            color: "#FFFFFF",
+            boxShadow: "4px 4px 0px 0px #000000",
+            fontSize: "15px",
+            fontWeight: 800,
+            fontFamily,
+            marginBottom: "8px",
+          }}
+        >
+          <span>✦</span>
+          <span>{currentBadge}</span>
+        </div>
+
+        {stackedScenes.map(({ scene: s, isCurrent }) => {
+          const sText =
+            s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+            s.content?.find((c: any) => c.is_hero)?.text ||
+            s.content?.[0]?.text ||
+            "";
+          if (!sText) return null;
+          const sStart = s.frame_range[0];
+          const baseSize =
+            stackedScenes.length > 2 ? 42 : stackedScenes.length === 2 ? 50 : 58;
+          const fontSize = sText.length > 25 ? baseSize - 6 : baseSize;
+
+          return (
+            <TapeStrip
+              key={s.id}
+              text={sText}
+              isBlack={!isCurrent}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
+              startFrame={sStart}
+            />
+          );
+        })}
+      </div>
+
+      {/* Lower 50%: Dynamic Bento Matrix OR Final CTA Takeover */}
+      {showBento && (
+        <div style={{ position: "absolute", inset: "52% 5% 6% 5%", zIndex: 5 }}>
+          {isFinalScene ? (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                backgroundColor: "#FFFFFF",
+                border: "3px solid #000000",
+                boxShadow: "10px 10px 0px 0px #000000",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "center",
+                alignItems: "center",
+                direction: "rtl",
+                gap: "12px",
+                padding: "20px",
+              }}
+            >
+              <span
+                style={{
+                  backgroundColor: ds.palette.accent,
+                  color: "#000000",
+                  fontSize: "16px",
+                  fontWeight: 900,
+                  padding: "4px 14px",
+                  border: "2px solid #000000",
+                  boxShadow: "3px 3px 0px 0px #000000",
+                }}
+              >
+                ✦ اقدام فوری
+              </span>
+              <span style={{ fontSize: "34px", fontWeight: 900, color: "#000000" }}>
+                همین حالا ثبت سفارش کنید
+              </span>
+            </div>
+          ) : (
+            <BentoMatrix style={{ width: "100%", height: "100%" }} />
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -187,6 +187,7 @@ class CreativeDNA:
     transformation_verbs: List[str]  # e.g. ["compress", "invert", "accrete", "reconcile"]
     palette: Palette
     font_family: str = "Dana"  # "Dana" | "Vazirmatn"
+    world: str = "pop-bento"  # "kinetic-poster" | "editorial" | "pop-bento"
 
     def __post_init__(self):
         if hasattr(self, "palette") and self.palette and hasattr(self.palette, "bg"):
@@ -200,7 +201,8 @@ class CreativeDNA:
             "metaphor_system": self.metaphor_system,
             "transformation_verbs": self.transformation_verbs,
             "palette": self.palette.to_dict() if hasattr(self.palette, "to_dict") else asdict(self.palette),
-            "font_family": self.font_family
+            "font_family": self.font_family,
+            "world": self.world
         }
 
 def clamp_badge(text: Optional[str], default_tag: str = "نکته کلیدی") -> str:

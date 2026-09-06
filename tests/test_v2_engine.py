@@ -185,6 +185,33 @@ class TestVoitomoV2Engine(unittest.TestCase):
         self.assertEqual(d["tapeText"], "#000000")
         self.assertEqual(d["shadowBlock"], "#000000")
 
+    def test_visual_world_classification(self):
+        """Verify Narrative Intent ➔ Visual World classification contract."""
+        from bot.services.director import classify_visual_world, direct_creative_spec
+
+        # 1. Music / Lyric / Poetry -> kinetic-poster
+        self.assertEqual(classify_visual_world("آهنگ عاشقانه همایون شجریان در دل شب"), "kinetic-poster")
+        self.assertEqual(classify_visual_world("ترانه و شعر زیبا"), "kinetic-poster")
+        self.assertEqual(classify_visual_world("متن دلخواه معمولی", audio_type="music"), "kinetic-poster")
+
+        # 2. Tutorial / LinkedIn / System -> editorial
+        self.assertEqual(classify_visual_world("آموزش تکنیک‌های پیشرفته برنامه‌نویسی پایتون"), "editorial")
+        self.assertEqual(classify_visual_world("چطور در لینکدین شبکه بسازیم و سیستم بسازیم"), "editorial")
+
+        # 3. Commercial / Ad / Default -> pop-bento
+        self.assertEqual(classify_visual_world("تخفیف ویژه آخر فصل ۵۰ درصد فروشگاه"), "pop-bento")
+
+        # 4. CreativeSpec propagation
+        music_words = [{"word": "ترانه", "start": 0.0, "end": 0.8}, {"word": "عاشقانه", "start": 0.9, "end": 1.5}]
+        spec_music = direct_creative_spec(music_words, fps=30, duration_sec=2.0)
+        self.assertEqual(spec_music.creative_dna.world, "kinetic-poster")
+        self.assertEqual(spec_music.to_dict()["creative_dna"]["world"], "kinetic-poster")
+
+        ed_words = [{"word": "آموزش", "start": 0.0, "end": 0.8}, {"word": "سیستم", "start": 0.9, "end": 1.5}]
+        spec_ed = direct_creative_spec(ed_words, fps=30, duration_sec=2.0)
+        self.assertEqual(spec_ed.creative_dna.world, "editorial")
+
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -284,6 +284,8 @@ class SceneNode:
             d["environment"] = self.environment
         if self.asset:
             d["asset"] = self.asset
+            if "vector_ir" in self.asset:
+                d["vector_ir"] = self.asset["vector_ir"]
         if self.type_spec:
             d["type"] = self.type_spec
             d["type_spec"] = self.type_spec
@@ -388,6 +390,8 @@ class CreativeSpec:
                 sc_dict["environment"] = s.environment
             if s.asset:
                 sc_dict["asset"] = s.asset
+                if "vector_ir" in s.asset:
+                    sc_dict["vector_ir"] = s.asset["vector_ir"]
             if s.type_spec:
                 sc_dict["type"] = s.type_spec
                 sc_dict["type_spec"] = s.type_spec

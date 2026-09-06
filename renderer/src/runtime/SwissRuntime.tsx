@@ -82,6 +82,7 @@ export interface CreativeSpecInput {
       spatial?: Record<string, any>;
       environment?: any;
       asset?: any;
+      vector_ir?: any;
       assetBox?: { x: number; y: number; w: number; h: number };
       type?: any;
       type_spec?: any;
@@ -289,10 +290,12 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           />
           <AssetLayer
             spec={activeScene?.asset}
+            vectorIR={activeScene?.vector_ir || activeScene?.asset?.vector_ir}
             box={activeScene?.assetBox || activeScene?.spatial?.asset_box}
             saliency={activeScene?.spatial}
             startFrame={startFrame}
             durationInFrames={sceneDuration}
+            palette={ds.palette}
           />
           <TypographyLayer
             spec={activeScene?.type || activeScene?.type_spec}

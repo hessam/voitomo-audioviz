@@ -59,17 +59,25 @@ class TestNegotiatedCompiler(unittest.TestCase):
         self.assertTrue(len(env.gradient_stops) >= 3)
 
     def test_asset_engine_procedural_visual_grammar(self):
-        """Verify Asset Engine generates procedural geometries and operators."""
-        # Tech topic
-        tech_asset = AssetEngine.propose("برنامه‌نویسی سیستم و سرور", "tech_career", self.palette, scene_idx=0)
-        self.assertIn(tech_asset.geometry, ["connected_graph", "particle_field", "vector_ribbon"])
-        self.assertIn(tech_asset.operator, ["draw", "cluster", "align", "attract", "expand"])
-        self.assertIsNotNone(tech_asset.entity_id)
+        """Verify Asset Engine generates declarative VectorIRAssembly with valid primitives and operators."""
+        # Scene 0: alignment_under_pressure
+        asset_0 = AssetEngine.propose("سیستم‌های ابری و مقیاس‌پذیری", self.palette, scene_idx=0)
+        self.assertIsNotNone(asset_0.vector_ir)
+        self.assertEqual(asset_0.vector_ir["metaphor_name"], "alignment_under_pressure")
+        self.assertIn("entities", asset_0.vector_ir)
+        self.assertGreaterEqual(len(asset_0.vector_ir["entities"]), 3)
 
-        # Poetry topic
-        poetry_asset = AssetEngine.propose("آواز و ترانه شبانه", "poetry_music", self.palette, scene_idx=0)
-        self.assertIn(poetry_asset.geometry, ["vector_ribbon", "concentric_contours", "particle_field"])
-        self.assertIn(poetry_asset.operator, ["flow", "accelerate", "radiate", "attract"])
+        for entity in asset_0.vector_ir["entities"]:
+            self.assertIn("primitive", entity)
+            self.assertIn(entity["primitive"], ["path", "circle", "line", "polygon", "arc_strip"])
+            self.assertIn("behavior", entity)
+            self.assertIn("operator", entity["behavior"])
+            self.assertIn(entity["behavior"]["operator"], ["attract", "align", "twist", "trim", "extrude", "shatter"])
+
+        # Scene 1: friction_reduction
+        asset_1 = AssetEngine.propose("رفع موانع و بهینه‌سازی جریان", self.palette, scene_idx=1)
+        self.assertEqual(asset_1.vector_ir["metaphor_name"], "friction_reduction")
+        self.assertGreaterEqual(len(asset_1.vector_ir["entities"]), 3)
 
     def test_type_engine_mode_switching_and_spring_physics(self):
         """Verify Type Engine selects appropriate font size and spring config."""

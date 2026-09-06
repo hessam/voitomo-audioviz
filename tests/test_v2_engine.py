@@ -108,6 +108,43 @@ class TestVoitomoV2Engine(unittest.TestCase):
         self.assertIn("push", RENDERER_CAPABILITY_MANIFEST)
         self.assertIn("pan_left", RENDERER_CAPABILITY_MANIFEST)
         self.assertIn("Dana", RENDERER_CAPABILITY_MANIFEST)
+        self.assertIn("bento_grid", RENDERER_CAPABILITY_MANIFEST)
+        self.assertIn("split_viewport", RENDERER_CAPABILITY_MANIFEST)
+
+    def test_layout_diversity_enforcement(self):
+        """Verify strict layout diversity: no consecutive identical layouts and >= 3 archetypes."""
+        from bot.services.director import enforce_layout_diversity
+
+        # Simulate 5 scenes all defaulting to hero_focus
+        scenes = [SceneNode(id=f"s{i}", frame_range=[i*30, (i+1)*30], layout="hero_focus") for i in range(5)]
+        diversified = enforce_layout_diversity(scenes)
+
+        # 1. No two consecutive scenes may share the same layout
+        for i in range(1, len(diversified)):
+            self.assertNotEqual(diversified[i].layout, diversified[i-1].layout, f"Consecutive layout collision at scene {i}!")
+
+        # 2. For >= 4 scenes, at least 3 distinct archetypes
+        distinct = set(s.layout for s in diversified)
+        self.assertGreaterEqual(len(distinct), 3, "Failed to produce >= 3 distinct archetypes!")
+
+    def test_badge_clamping(self):
+        """Verify badge is clamped to <= 3 words and <= 20 characters."""
+        from contracts.creative_spec import clamp_badge
+
+        # Long sentence / thesis
+        long_text = "تاکید ساختاری و ریتمیک بر محور تغییرات عمیق در سازمان و جامعه"
+        clamped = clamp_badge(long_text)
+        words = clamped.split()
+        self.assertLessEqual(len(words), 3)
+        self.assertLessEqual(len(clamped), 20)
+
+        # Short badge preserved
+        short_text = "#کاریابی"
+        self.assertEqual(clamp_badge(short_text), "#کاریابی")
+
+        # English tag
+        eng_text = "TIP 01 LINKEDIN"
+        self.assertEqual(clamp_badge(eng_text), "TIP 01 LINKEDIN")
 
 if __name__ == "__main__":
     unittest.main()

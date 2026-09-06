@@ -326,7 +326,7 @@ export const KineticPosterWorld: React.FC<{
         zIndex: 10,
       }}
     >
-      {stackedScenes.map(({ scene: s, isCurrent }) => {
+      {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
         const sText =
           s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
           s.content?.find((c: any) => c.is_hero)?.text ||
@@ -335,10 +335,11 @@ export const KineticPosterWorld: React.FC<{
         if (!sText) return null;
         const sStart = s.frame_range[0];
 
-        // 75-110px typographic scaling based on stack depth and phrase length
+        // 78-106px bold hero typography commanding center canvas
         const baseSize =
-          stackedScenes.length > 2 ? 76 : stackedScenes.length === 2 ? 88 : 104;
+          stackedScenes.length > 2 ? 78 : stackedScenes.length === 2 ? 90 : 106;
         const fontSize = sText.length > 24 ? baseSize - 12 : baseSize;
+        const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
         return (
           <TapeStrip
@@ -348,7 +349,8 @@ export const KineticPosterWorld: React.FC<{
             fontSize={fontSize}
             fontFamily={fontFamily}
             startFrame={sStart}
-            style={{ margin: "10px 0" }}
+            tiltAngle={tiltAngle}
+            style={{ margin: "12px 0" }}
           />
         );
       })}
@@ -358,8 +360,8 @@ export const KineticPosterWorld: React.FC<{
 
 /**
  * Visual World 2: Editorial (Education / Tutorial / LinkedIn)
- * Strict Bans: BANNED: 8-tile bento icon matrix, full-bleed poster scaling.
- * What is rendered: Chapter cards, step badges, annotated comparisons, balanced 55px typography, minimal subtitle HUD.
+ * Strict Bans: BANNED: 8-tile bento icon matrix, full-bleed poster scaling, frozen PowerPoint footers.
+ * What is rendered: High-energy Persian typography commanding center 60% of screen + minimal subtitle HUD.
  */
 export const EditorialWorld: React.FC<{
   scene?: any;
@@ -380,23 +382,12 @@ export const EditorialWorld: React.FC<{
   frame,
   fontFamily,
   ds,
-  creativeSpec,
 }) => {
   const currentBadge = clampBadge(
     scene?.badge || scene?.layers?.find((l: any) => l.type === "kinetic_badge")?.text,
-    "آموزش و بررسی"
+    "نکته کلیدی"
   );
   const progressRatio = Math.min(1, Math.max(0, frame / (totalFrames || 1)));
-
-  // Extract structured points or comparison cards
-  const points = scene?.layers?.filter((l: any) => !l.is_hero && l.text) || [];
-  const displayItems =
-    points.length > 0
-      ? points.slice(0, 2)
-      : [
-          { text: creativeSpec?.creative_dna?.thesis || "تحلیل ساختار و بهینه‌سازی فرآیند", weight: "700" },
-          { text: creativeSpec?.creative_dna?.emotional_contradiction || "تعادل میان دقت اجرایی و سرعت", weight: "500" },
-        ];
 
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", fontFamily }}>
@@ -413,7 +404,7 @@ export const EditorialWorld: React.FC<{
           fontSize: "14px",
           fontFamily: "monospace, sans-serif",
           color: ds.palette.muted,
-          opacity: 0.75,
+          opacity: 0.85,
           zIndex: 20,
         }}
       >
@@ -426,14 +417,11 @@ export const EditorialWorld: React.FC<{
         </div>
       </div>
 
-      {/* Upper 40%: Balanced 55px Typography */}
+      {/* Spoken Persian phrases commanding the center vertical canvas (72px - 96px) */}
       <div
         style={{
           position: "absolute",
-          top: "70px",
-          left: "48px",
-          right: "48px",
-          height: "38%",
+          inset: "80px 48px 40px 48px",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
@@ -443,7 +431,7 @@ export const EditorialWorld: React.FC<{
           zIndex: 10,
         }}
       >
-        {stackedScenes.slice(-2).map(({ scene: s, isCurrent }) => {
+        {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
           const sText =
             s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
             s.content?.find((c: any) => c.is_hero)?.text ||
@@ -451,7 +439,11 @@ export const EditorialWorld: React.FC<{
             "";
           if (!sText) return null;
           const sStart = s.frame_range[0];
-          const fontSize = sText.length > 25 ? 48 : 55;
+          // 72px - 96px bold hero typography
+          const baseSize =
+            stackedScenes.length > 2 ? 72 : stackedScenes.length === 2 ? 84 : 96;
+          const fontSize = sText.length > 24 ? baseSize - 12 : baseSize;
+          const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
           return (
             <TapeStrip
@@ -461,60 +453,11 @@ export const EditorialWorld: React.FC<{
               fontSize={fontSize}
               fontFamily={fontFamily}
               startFrame={sStart}
+              tiltAngle={tiltAngle}
+              style={{ margin: "10px 0" }}
             />
           );
         })}
-      </div>
-
-      {/* Lower 50%: Clean Step Cards & Annotated Comparisons */}
-      <div
-        style={{
-          position: "absolute",
-          top: "48%",
-          bottom: "40px",
-          left: "48px",
-          right: "48px",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          gap: "16px",
-          direction: "rtl",
-          zIndex: 10,
-        }}
-      >
-        {displayItems.map((item: any, idx: number) => (
-          <div
-            key={idx}
-            style={{
-              backgroundColor: "#FFFFFF",
-              color: "#000000",
-              border: "2px solid #000000",
-              boxShadow: "6px 6px 0px 0px #000000",
-              padding: "18px 24px",
-              display: "flex",
-              alignItems: "center",
-              gap: "16px",
-            }}
-          >
-            <span
-              style={{
-                backgroundColor: ds.palette.accent,
-                color: "#000000",
-                fontSize: "14px",
-                fontWeight: 900,
-                padding: "4px 10px",
-                border: "1px solid #000000",
-                boxShadow: "2px 2px 0px 0px #000000",
-                fontFamily: "monospace",
-              }}
-            >
-              0{idx + 1}
-            </span>
-            <span style={{ fontSize: "22px", fontWeight: 700, color: "#000000" }}>
-              {item.text}
-            </span>
-          </div>
-        ))}
       </div>
 
       {/* Minimal Subtitle HUD Progress Bar */}
@@ -566,7 +509,6 @@ export const PopBentoWorld: React.FC<{
   scenesCount,
   fontFamily,
   ds,
-  showBento,
   cameraTransform = "none",
 }) => {
   const currentBadge = clampBadge(
@@ -624,7 +566,7 @@ export const PopBentoWorld: React.FC<{
           <span>{currentBadge}</span>
         </div>
 
-        {stackedScenes.map(({ scene: s, isCurrent }) => {
+        {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
           const sText =
             s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
             s.content?.find((c: any) => c.is_hero)?.text ||
@@ -632,9 +574,12 @@ export const PopBentoWorld: React.FC<{
             "";
           if (!sText) return null;
           const sStart = s.frame_range[0];
-          const baseSize =
-            stackedScenes.length > 2 ? 42 : stackedScenes.length === 2 ? 50 : 58;
-          const fontSize = sText.length > 25 ? baseSize - 6 : baseSize;
+          // Scale font up: 72px - 92px without bento, 50px - 66px with bento
+          const baseSize = isBento
+            ? (stackedScenes.length > 2 ? 50 : stackedScenes.length === 2 ? 58 : 66)
+            : (stackedScenes.length > 2 ? 72 : stackedScenes.length === 2 ? 82 : 92);
+          const fontSize = sText.length > 25 ? baseSize - 10 : baseSize;
+          const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
           return (
             <TapeStrip
@@ -644,6 +589,7 @@ export const PopBentoWorld: React.FC<{
               fontSize={fontSize}
               fontFamily={fontFamily}
               startFrame={sStart}
+              tiltAngle={tiltAngle}
             />
           );
         })}

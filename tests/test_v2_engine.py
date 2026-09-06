@@ -146,5 +146,45 @@ class TestVoitomoV2Engine(unittest.TestCase):
         eng_text = "TIP 01 LINKEDIN"
         self.assertEqual(clamp_badge(eng_text), "TIP 01 LINKEDIN")
 
+    def test_safe_hue_anti_sludge_snapping(self):
+        """Verify safe_hue snaps brown sludge zone (20-105) to Coral Red (15) or Acid Lime (115)."""
+        from contracts.creative_spec import safe_hue
+
+        # Muddy brown test values
+        self.assertEqual(safe_hue(20), 15.0)
+        self.assertEqual(safe_hue(45), 15.0)
+        self.assertEqual(safe_hue(62), 15.0)
+        self.assertEqual(safe_hue(63), 115.0)
+        self.assertEqual(safe_hue(90), 115.0)
+        self.assertEqual(safe_hue(105), 115.0)
+
+        # Safe hues remain unaffected
+        self.assertEqual(safe_hue(0), 0.0)
+        self.assertEqual(safe_hue(15), 15.0)
+        self.assertEqual(safe_hue(120), 120.0)
+        self.assertEqual(safe_hue(240), 240.0)
+        self.assertEqual(safe_hue(350), 350.0)
+
+    def test_compile_palette_oklch_math(self):
+        """Verify pure OKLCH color compilation and hard black shadow block contract."""
+        from contracts.creative_spec import compile_palette
+
+        pal_dark = compile_palette(mood="bold", hue=45, variant="dark")
+        # 45 is snapped to 15 (Coral Red)
+        self.assertIn("oklch(0.40 0.20 15.0)", pal_dark.bg)
+        self.assertEqual(pal_dark.tape_bg, "#FFFFFF")
+        self.assertEqual(pal_dark.tape_text, "#000000")
+        self.assertEqual(pal_dark.shadow_block, "#000000")
+
+        pal_light = compile_palette(mood="electric", hue=240, variant="light")
+        self.assertIn("oklch(0.78 0.25 240.0)", pal_light.bg)
+
+        # Ensure to_dict contains camelCase keys for React/Remotion runtime
+        d = pal_dark.to_dict()
+        self.assertEqual(d["tapeBg"], "#FFFFFF")
+        self.assertEqual(d["tapeText"], "#000000")
+        self.assertEqual(d["shadowBlock"], "#000000")
+
 if __name__ == "__main__":
     unittest.main()
+

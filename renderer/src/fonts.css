@@ -23,3 +23,24 @@
   font-weight: 900;
   font-style: normal;
 }
+
+.tape-strip {
+  display: inline-block;
+  background: #FFFFFF;
+  color: #000000;
+  box-shadow: 12px 12px 0px 0px #000000; /* Hard Canva-style black block shadow */
+  padding: 10px 24px 14px;
+  font-family: "Vazirmatn", "Dana", sans-serif;
+  font-weight: 800;
+  font-size: 58px;
+  line-height: 1.6;
+  direction: rtl;
+  unicode-bidi: isolate;
+  letter-spacing: normal;
+}
+
+.tape-strip.black {
+  background: #000000;
+  color: #FFFFFF;
+}
+

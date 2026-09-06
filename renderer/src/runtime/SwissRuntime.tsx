@@ -5,6 +5,8 @@ import { SpecimenLadder } from "./primitives/layouts/SpecimenLadder";
 import { ParagraphStack } from "./primitives/layouts/ParagraphStack";
 import { CaptionPanel } from "./primitives/layouts/CaptionPanel";
 import { PersianText } from "./primitives/PersianText";
+import { TapeStrip } from "./primitives/TapeStrip";
+import { BentoMatrix, GraphicTile } from "./primitives/BentoMatrix";
 
 export interface LayerNodeInput {
   id: string;
@@ -405,14 +407,12 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
             </div>
 
             {heroLayer && (
-              <PersianText
+              <TapeStrip
                 text={heroLayer.text || ""}
+                isBlack={false}
+                fontSize={heroLayer.text && heroLayer.text.length > 25 ? 46 : 56}
                 fontFamily={fontFamily}
-                fontSize={heroLayer.text && heroLayer.text.length > 25 ? 54 : 68}
-                fontWeight={900}
-                color={ds.palette.fg}
                 startFrame={startFrame}
-                durationInFrames={18}
               />
             )}
           </div>
@@ -491,24 +491,14 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
           {layers.filter(l => l.type === "typography").map((layer, lIdx) => {
             const isH = layer.is_hero || lIdx === 0;
             return (
-              <div
+              <TapeStrip
                 key={layer.id}
-                style={{
-                  borderRight: `4px solid ${isH ? ds.palette.accent : `${ds.palette.fg}33`}`,
-                  paddingRight: "20px",
-                  margin: "6px 0",
-                }}
-              >
-                <PersianText
-                  text={layer.text || ""}
-                  fontFamily={fontFamily}
-                  fontSize={isH ? 64 : 36}
-                  fontWeight={isH ? 900 : 600}
-                  color={isH ? ds.palette.fg : ds.palette.muted}
-                  startFrame={startFrame + lIdx * 4}
-                  durationInFrames={18}
-                />
-              </div>
+                text={layer.text || ""}
+                isBlack={!isH}
+                fontSize={isH ? 50 : 34}
+                fontFamily={fontFamily}
+                startFrame={startFrame + lIdx * 4}
+              />
             );
           })}
         </div>
@@ -572,71 +562,77 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
       );
     }
 
-    // 5. HERO FOCUS / DEFAULT ARCHETYPE: Monumental headline with kinetic pill & divider
+    // 5. HERO FOCUS / ANCHORED CAVALRY ARCHETYPE:
+    // Upper canvas (top 0-52%): Centered tape-strip typography + kinetic badge
+    // Lower canvas (bottom 45%): 4x2 geometric bento matrix (Cavalry anchor)
     return (
       <div
         style={{
           width: "100%",
           height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-          padding: "80px",
-          boxSizing: "border-box",
+          position: "relative",
           direction: "rtl",
-          gap: "20px",
           ...heroVerbStyle,
         }}
       >
+        {/* Upper Centered Typography Block */}
         <div
           style={{
-            display: "inline-flex",
+            position: "absolute",
+            top: "80px",
+            left: "5%",
+            right: "5%",
+            height: "44%",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
             alignItems: "center",
-            gap: "8px",
-            padding: "6px 18px",
-            borderRadius: "999px",
-            border: `1px solid ${ds.palette.accent}55`,
-            backgroundColor: `${ds.palette.accent}18`,
-            color: ds.palette.accent,
-            fontSize: "18px",
-            fontWeight: 700,
-            fontFamily,
+            textAlign: "center",
+            gap: "12px",
+            zIndex: 10,
           }}
         >
-          <span>✦</span>
-          <span>{sceneBadge}</span>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "4px 16px",
+              backgroundColor: "#000000",
+              color: "#FFFFFF",
+              boxShadow: "4px 4px 0px 0px #000000",
+              fontSize: "16px",
+              fontWeight: 800,
+              fontFamily,
+            }}
+          >
+            <span>✦</span>
+            <span>{sceneBadge}</span>
+          </div>
+
+          {heroLayer && (
+            <TapeStrip
+              text={heroLayer.text || ""}
+              isBlack={false}
+              fontSize={heroLayer.text && heroLayer.text.length > 25 ? 50 : 64}
+              fontFamily={fontFamily}
+              startFrame={startFrame}
+            />
+          )}
+
+          {nonHeroLayers[0] && (
+            <TapeStrip
+              text={nonHeroLayers[0].text || ""}
+              isBlack={true}
+              fontSize={28}
+              fontFamily={fontFamily}
+              startFrame={startFrame + 6}
+            />
+          )}
         </div>
 
-        <div style={{ width: "80px", height: "3px", backgroundColor: ds.palette.accent }} />
-
-        {heroLayer && (
-          <div style={{ textAlign: "center", maxWidth: "860px" }}>
-            <PersianText
-              text={heroLayer.text || ""}
-              fontFamily={fontFamily}
-              fontSize={heroLayer.text && heroLayer.text.length > 25 ? 60 : 78}
-              fontWeight={900}
-              color={ds.palette.fg}
-              startFrame={startFrame}
-              durationInFrames={20}
-            />
-          </div>
-        )}
-
-        {nonHeroLayers[0] && (
-          <div style={{ textAlign: "center", maxWidth: "700px" }}>
-            <PersianText
-              text={nonHeroLayers[0].text || ""}
-              fontFamily={fontFamily}
-              fontSize={30}
-              fontWeight={500}
-              color={ds.palette.muted}
-              startFrame={startFrame + 6}
-              durationInFrames={18}
-            />
-          </div>
-        )}
+        {/* Lower Canvas Geometric Bento Matrix (Cavalry Anchor) */}
+        <BentoMatrix />
       </div>
     );
   };

@@ -9,6 +9,23 @@ class Palette:
     fg: str
     accent: str
     muted: str
+    tape_bg: str = "#FFFFFF"
+    tape_text: str = "#000000"
+    shadow_block: str = "#000000"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "bg": self.bg,
+            "fg": self.fg,
+            "accent": self.accent,
+            "muted": self.muted,
+            "tape_bg": self.tape_bg,
+            "tape_text": self.tape_text,
+            "shadow_block": self.shadow_block,
+            "tapeBg": self.tape_bg,
+            "tapeText": self.tape_text,
+            "shadowBlock": self.shadow_block
+        }
 
 @dataclass
 class TypeScale:
@@ -44,62 +61,101 @@ class CreativeDNA:
             "emotional_contradiction": self.emotional_contradiction,
             "metaphor_system": self.metaphor_system,
             "transformation_verbs": self.transformation_verbs,
-            "palette": asdict(self.palette),
+            "palette": self.palette.to_dict() if hasattr(self.palette, "to_dict") else asdict(self.palette),
             "font_family": self.font_family
         }
 
+def safe_hue(hue: float) -> float:
+    """
+    Automatically snaps muddy earth/brown hues (20-105) to either Coral Red (15) or Acid Lime (115).
+    Permanently bans the brown/sludge zone.
+    """
+    h = ((hue % 360) + 360) % 360
+    if 20 <= h <= 105:
+        return 15.0 if h < 63 else 115.0
+    return float(h)
+
+ACCENT_HEX_MAP = [
+    "#FF5722",  # Coral Red
+    "#10B981",  # Emerald
+    "#2563EB",  # Cobalt
+    "#F59E0B",  # Amber
+    "#EC4899",  # Pink Orchid
+    "#A855F7",  # Electric Purple
+    "#06B6D4",  # Cyan
+    "#84CC16",  # Lime
+]
+
+def compile_palette(mood: str = "bold", hue: float = 0.0, variant: str = "dark") -> Palette:
+    """
+    Pure OKLCH color compiler preventing muddy brown/sludge colors.
+    Moods: 'calm' (C=0.12), 'bold' (C=0.20), 'electric' (C=0.25).
+    Variant: 'dark' (L=0.40) or 'light' (L=0.78).
+    Sets stark White/Black text containers with #000000 hard offset block shadows.
+    """
+    h = safe_hue(hue)
+    dark = (variant == "dark")
+    chroma_map = {"calm": 0.12, "bold": 0.20, "electric": 0.25}
+    chroma = chroma_map.get(mood, 0.20)
+    lightness = 0.40 if dark else 0.78
+    bg_oklch = f"oklch({lightness:.2f} {chroma:.2f} {h:.1f})"
+
+    accent_idx = int(round(h / 45.0)) % len(ACCENT_HEX_MAP)
+    accent = ACCENT_HEX_MAP[accent_idx]
+
+    return Palette(
+        bg=bg_oklch,
+        fg="#FFFFFF" if dark else "#000000",
+        accent=accent,
+        muted="#E4E4E7" if dark else "#3F3F46",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    )
+
 HARMONIC_PALETTES = [
-    # 0. Warm Terracotta / Rust Copper
-    Palette(bg="#2A140E", fg="#F8F3F0", accent="#FF5722", muted="#9C8279"),
-    # 1. Architectural Monochrome / Ink on Cream (High-Key Light Mode)
-    Palette(bg="#F5F0E6", fg="#18181B", accent="#E11D48", muted="#71717A"),
-    # 2. Deep Emerald Forest / Mint
-    Palette(bg="#062C22", fg="#F0FDF4", accent="#10B981", muted="#6EE7B7"),
-    # 3. Swiss Minimalist Concrete / Cobalt (Light Mode)
-    Palette(bg="#E5E7EB", fg="#111827", accent="#2563EB", muted="#4B5563"),
-    # 4. Neo-Cobalt Midnight / Solar Gold
-    Palette(bg="#0A192F", fg="#F8FAFC", accent="#F59E0B", muted="#60A5FA"),
-    # 5. Solar Sand / Warm Ochre (Light Mode)
-    Palette(bg="#FEF3C7", fg="#451A03", accent="#D97706", muted="#92400E"),
-    # 6. Deep Velvet Plum / Neon Orchid
-    Palette(bg="#2E1035", fg="#FAF5FF", accent="#EC4899", muted="#C084FC"),
-    # 7. Editorial Charcoal / Electric Violet
-    Palette(bg="#18181B", fg="#FAFAFA", accent="#A855F7", muted="#A1A1AA"),
+    compile_palette(mood="bold", hue=15.0, variant="dark"),     # Coral Red (15)
+    compile_palette(mood="bold", hue=240.0, variant="light"),   # Clean Cobalt Light
+    compile_palette(mood="calm", hue=165.0, variant="dark"),    # Deep Emerald
+    compile_palette(mood="calm", hue=220.0, variant="light"),   # Swiss Sky Light
+    compile_palette(mood="electric", hue=265.0, variant="dark"),# Electric Violet
+    compile_palette(mood="electric", hue=115.0, variant="dark"),# Acid Lime (115)
+    compile_palette(mood="bold", hue=320.0, variant="dark"),    # Neon Orchid
+    compile_palette(mood="calm", hue=210.0, variant="dark"),    # Deep Slate
 ]
 
 def generate_harmonic_palette(seed_text: str, mood_verb: str = "") -> Palette:
     """
-    Procedurally generates an expressive, harmonic palette from text semantics and mood verb.
-    Categorizes emotional/domain mood to prevent palette collision across genres:
-    - Literary / Nocturne / Melodic -> Deep Emerald (#062C22) or Velvet Plum (#2E1035)
-    - Systems / Science / Architecture -> Architectural Cream (#F5F0E6) or Concrete (#E5E7EB)
-    - Velocity / Commercial / Action -> Warm Terracotta (#2A140E) or Solar Gold (#FEF3C7)
-    - Cyber / Modern Tech -> Neo-Cobalt (#0A192F) or Charcoal (#18181B)
-    STRICT BAN on hardcoded '#090A0F' navy fallback.
+    Procedurally compiles a vibrant OKLCH palette from text semantics and mood verb.
+    Bans the brown sludge zone (hues 20°-105°) via safe_hue.
+    Computes backgrounds with compile_palette and stark White/Black text containers
+    with #000000 hard offset block shadows.
     """
     import hashlib
     combined = f"{seed_text}_{mood_verb}".lower()
 
-    # 1. Nocturne / Lyric / Poetry / Organic
+    # 1. Nocturne / Lyric / Poetry / Organic -> Calm emerald deep
     lyric_keywords = ["شب", "سکوت", "کویر", "ماه", "رقص", "ستاره", "عشق", "شعر", "دل", "ترانه", "موزیک", "آواز", "باران"]
     if any(k in combined for k in lyric_keywords):
-        return HARMONIC_PALETTES[2]  # Deep Emerald (#062C22)
+        return compile_palette(mood="calm", hue=165.0, variant="dark")
 
-    # 2. Systems / Governance / Academic / Structure
+    # 2. Systems / Governance / Academic / Architecture -> Bold cobalt light
     systems_keywords = ["سیستم", "غیرمتمرکز", "ساختار", "داده", "الگوریتم", "معماری", "توسعه", "علم", "تحلیل", "کنترل", "تصمیم"]
     if any(k in combined for k in systems_keywords):
-        return HARMONIC_PALETTES[1]  # Architectural Cream Light (#F5F0E6)
+        return compile_palette(mood="bold", hue=240.0, variant="light")
 
-    # 3. Commercial / Speed / High-Tempo / Marketing
+    # 3. Commercial / Speed / Action / Marketing -> Electric coral red
     commercial_keywords = ["ثانیه", "فقط", "برند", "فروش", "سریع", "پول", "کسب", "جهانی", "میلیون", "تخفیف", "تبلیغ", "بازار"]
     if any(k in combined for k in commercial_keywords):
-        return HARMONIC_PALETTES[0]  # Warm Terracotta (#2A140E)
+        return compile_palette(mood="electric", hue=15.0, variant="dark")
 
-    # Fallback to high-dispersion SHA-256 hash
+    # High-dispersion hash for infinite semantic diversity
     hash_int = int(hashlib.sha256(combined.encode("utf-8")).hexdigest(), 16)
-    idx = hash_int % len(HARMONIC_PALETTES)
-    base = HARMONIC_PALETTES[idx]
-    return Palette(bg=base.bg, fg=base.fg, accent=base.accent, muted=base.muted)
+    hue = float(hash_int % 360)
+    moods = ["calm", "bold", "electric"]
+    mood = moods[(hash_int >> 4) % 3]
+    variant = "dark" if (hash_int % 2 == 0) else "light"
+    return compile_palette(mood=mood, hue=hue, variant=variant)
 
 def clamp_badge(text: Optional[str], default_tag: str = "نکته کلیدی") -> str:
     """
@@ -229,9 +285,16 @@ class CreativeSpec:
     composition_graph: Optional[CompositionGraph] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        ds_dict = asdict(self.design_system)
+        if "palette" in ds_dict:
+            p = ds_dict["palette"]
+            p["tapeBg"] = p.get("tape_bg", "#FFFFFF")
+            p["tapeText"] = p.get("tape_text", "#000000")
+            p["shadowBlock"] = p.get("shadow_block", "#000000")
+
         d = {
             "meta": self.meta,
-            "design_system": asdict(self.design_system),
+            "design_system": ds_dict,
             "timeline": {
                 "scenes": [
                     {
@@ -261,9 +324,13 @@ class CreativeSpec:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CreativeSpec":
         ds_data = data["design_system"]
+        pal_data = dict(ds_data["palette"])
+        pal_data.pop("tapeBg", None)
+        pal_data.pop("tapeText", None)
+        pal_data.pop("shadowBlock", None)
         design_system = DesignSystem(
             concept=ds_data.get("concept", "Bespoke Typographic Narrative"),
-            palette=Palette(**ds_data["palette"]),
+            palette=Palette(**pal_data),
             type_scale=TypeScale(**ds_data["type_scale"]),
             grid=Grid(**ds_data.get("grid", {})),
             motion_signature=MotionSignature(**ds_data.get("motion_signature", {}))

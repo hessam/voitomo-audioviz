@@ -562,7 +562,7 @@ def synthesize_creative_dna(
         '  "metaphor_system": "...",\n'
         '  "transformation_verbs": ["compress", "accrete", "reconcile"],\n'
         '  "font_family": "Dana",\n'
-        '  "palette": {"bg": "#1C1412", "fg": "#F7F1ED", "accent": "#E05638", "muted": "#8C7D75"}\n'
+        '  "palette": {"bg": "#5537ED", "fg": "#FFFFFF", "accent": "#D4FF00", "muted": "#E0E7FF"}\n'
         "}"
     )
 

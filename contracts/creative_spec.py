@@ -46,25 +46,6 @@ class MotionSignature:
     reveal_direction: str = "in_place"  # "in_place" | "left_to_right" | "top_to_bottom"
     corruption_density: float = 0.35
 
-@dataclass
-class CreativeDNA:
-    thesis: str
-    emotional_contradiction: str
-    metaphor_system: str  # Relational transfer metaphor (e.g. "Centrifugal compression of market forces")
-    transformation_verbs: List[str]  # e.g. ["compress", "invert", "accrete", "reconcile"]
-    palette: Palette
-    font_family: str = "Dana"  # "Dana" | "Vazirmatn"
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "thesis": self.thesis,
-            "emotional_contradiction": self.emotional_contradiction,
-            "metaphor_system": self.metaphor_system,
-            "transformation_verbs": self.transformation_verbs,
-            "palette": self.palette.to_dict() if hasattr(self.palette, "to_dict") else asdict(self.palette),
-            "font_family": self.font_family
-        }
-
 def safe_hue(hue: float) -> float:
     """
     Automatically snaps muddy earth/brown hues (20-105) to either Coral Red (15) or Acid Lime (115).
@@ -182,25 +163,45 @@ def generate_harmonic_palette(seed_text: str, mood_verb: str = "") -> Palette:
     import hashlib
     combined = f"{seed_text}_{mood_verb}".lower()
 
-    # 1. Technical / Systems / Professional / Marketing -> Electric Cobalt (#5537ED)
     tech_keywords = ["لینکدین", "سیستم", "شرکت", "شغل", "کار", "پروژه", "رزومه", "مصاحبه", "تخصص", "فناوری", "رشد", "برند"]
     if any(k in combined for k in tech_keywords):
         return SAFE_PALETTES["electric_cobalt"]
 
-    # 2. Editorial / Minimalist / Architecture -> Studio Concrete (#B8B9BA)
     editorial_keywords = ["معماری", "طراحی", "سوئیس", "ساختار", "هنر", "تایپوگرافی", "ساده", "سفید", "خاکستری"]
     if any(k in combined for k in editorial_keywords):
         return SAFE_PALETTES["studio_concrete"]
 
-    # 3. Night / Acid / Nocturne -> Signal Acid (#0E0F12 with #D4FF00)
     night_keywords = ["شب", "سکوت", "موزیک", "ترانه", "آواز", "صدا", "سیگنال"]
     if any(k in combined for k in night_keywords):
         return SAFE_PALETTES["signal_acid"]
 
-    # Hash fallback across the 3 safe benchmark palettes
     hash_int = int(hashlib.sha256(combined.encode("utf-8")).hexdigest(), 16)
     choices = [SAFE_PALETTES["electric_cobalt"], SAFE_PALETTES["studio_concrete"], SAFE_PALETTES["signal_acid"]]
     return choices[hash_int % len(choices)]
+
+@dataclass
+class CreativeDNA:
+    thesis: str
+    emotional_contradiction: str
+    metaphor_system: str  # Relational transfer metaphor (e.g. "Centrifugal compression of market forces")
+    transformation_verbs: List[str]  # e.g. ["compress", "invert", "accrete", "reconcile"]
+    palette: Palette
+    font_family: str = "Dana"  # "Dana" | "Vazirmatn"
+
+    def __post_init__(self):
+        if hasattr(self, "palette") and self.palette and hasattr(self.palette, "bg"):
+            if is_banned_sludge_color(self.palette.bg):
+                self.palette = generate_harmonic_palette(self.thesis or self.metaphor_system or "سوئیس")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "thesis": self.thesis,
+            "emotional_contradiction": self.emotional_contradiction,
+            "metaphor_system": self.metaphor_system,
+            "transformation_verbs": self.transformation_verbs,
+            "palette": self.palette.to_dict() if hasattr(self.palette, "to_dict") else asdict(self.palette),
+            "font_family": self.font_family
+        }
 
 def clamp_badge(text: Optional[str], default_tag: str = "نکته کلیدی") -> str:
     """
@@ -294,6 +295,11 @@ class DesignSystem:
     type_scale: TypeScale
     grid: Grid
     motion_signature: MotionSignature
+
+    def __post_init__(self):
+        if hasattr(self, "palette") and self.palette and hasattr(self.palette, "bg"):
+            if is_banned_sludge_color(self.palette.bg):
+                self.palette = generate_harmonic_palette(self.concept or "سوئیس")
 
 @dataclass
 class RevealConfig:

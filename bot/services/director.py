@@ -6,9 +6,10 @@ import re
 import time
 from contracts.creative_spec import (
     CreativeSpec, DesignSystem, Palette, TypeScale, Grid, MotionSignature, RevealConfig, Scene, SceneContent,
-    CreativeDNA, CompositionGraph, SceneNode, LayerNode, generate_harmonic_palette, clamp_badge
+    CreativeDNA, CompositionGraph, SceneNode, LayerNode, generate_harmonic_palette, clamp_badge,
+    safe_hue, compile_palette
 )
-from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop
+from bot.services.normalizer import enforce_wcag_contrast, sanitize_anti_slop, hex_to_rgb
 
 logger = logging.getLogger(__name__)
 
@@ -595,19 +596,43 @@ def synthesize_creative_dna(
 
         parsed = json.loads(content)
         pal_raw = parsed.get("palette", {})
-        bg = pal_raw.get("bg", "#1C1412")
-        fg = pal_raw.get("fg", "#F7F1ED")
-        # Strict ban on #090A0F
-        if bg.upper().strip() in ("#090A0F", "#0A0B0E"):
+        bg = pal_raw.get("bg", "")
+        # Strict ban on #090A0F and muddy sludge zone (hues 20-105)
+        if not bg or bg.upper().strip() in ("#090A0F", "#0A0B0E"):
             clean_palette = generate_harmonic_palette(full_text, parsed.get("thesis", ""))
         else:
-            clean_bg, clean_fg = enforce_wcag_contrast(bg, fg)
-            clean_palette = Palette(
-                bg=clean_bg,
-                fg=clean_fg,
-                accent=pal_raw.get("accent", "#E05638"),
-                muted=pal_raw.get("muted", "#8C7D75")
-            )
+            m = re.search(r"oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\)", bg)
+            if m:
+                l, c, h = float(m.group(1)), float(m.group(2)), float(m.group(3))
+                safe_h = safe_hue(h)
+                mood = "electric" if c >= 0.22 else ("bold" if c >= 0.16 else "calm")
+                variant = "dark" if l < 0.6 else "light"
+                clean_palette = compile_palette(mood=mood, hue=safe_h, variant=variant)
+            else:
+                try:
+                    import colorsys
+                    r, g, b = hex_to_rgb(bg)
+                    h_frac, l_frac, s_frac = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+                    hue_deg = h_frac * 360.0
+                    if 20 <= hue_deg <= 105:
+                        safe_h = safe_hue(hue_deg)
+                        variant = "dark" if l_frac < 0.55 else "light"
+                        mood = "electric" if s_frac > 0.6 else ("bold" if s_frac > 0.3 else "calm")
+                        clean_palette = compile_palette(mood=mood, hue=safe_h, variant=variant)
+                    else:
+                        fg = pal_raw.get("fg", "#FFFFFF")
+                        clean_bg, clean_fg = enforce_wcag_contrast(bg, fg)
+                        clean_palette = Palette(
+                            bg=clean_bg,
+                            fg=clean_fg,
+                            accent="#000000",
+                            muted="#71717A",
+                            tape_bg="#FFFFFF",
+                            tape_text="#000000",
+                            shadow_block="#000000"
+                        )
+                except Exception:
+                    clean_palette = generate_harmonic_palette(full_text, parsed.get("thesis", ""))
 
         dna = CreativeDNA(
             thesis=sanitize_anti_slop(parsed.get("thesis", "Bespoke Typographic Narrative")),

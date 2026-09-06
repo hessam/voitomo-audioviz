@@ -30,6 +30,140 @@ class MotionSignature:
     corruption_density: float = 0.35
 
 @dataclass
+class CreativeDNA:
+    thesis: str
+    emotional_contradiction: str
+    metaphor_system: str  # Relational transfer metaphor (e.g. "Centrifugal compression of market forces")
+    transformation_verbs: List[str]  # e.g. ["compress", "invert", "accrete", "reconcile"]
+    palette: Palette
+    font_family: str = "Dana"  # "Dana" | "Vazirmatn"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "thesis": self.thesis,
+            "emotional_contradiction": self.emotional_contradiction,
+            "metaphor_system": self.metaphor_system,
+            "transformation_verbs": self.transformation_verbs,
+            "palette": asdict(self.palette),
+            "font_family": self.font_family
+        }
+
+HARMONIC_PALETTES = [
+    # 0. Warm Terracotta / Rust Copper
+    Palette(bg="#2A140E", fg="#F8F3F0", accent="#FF5722", muted="#9C8279"),
+    # 1. Architectural Monochrome / Ink on Cream (High-Key Light Mode)
+    Palette(bg="#F5F0E6", fg="#18181B", accent="#E11D48", muted="#71717A"),
+    # 2. Deep Emerald Forest / Mint
+    Palette(bg="#062C22", fg="#F0FDF4", accent="#10B981", muted="#6EE7B7"),
+    # 3. Swiss Minimalist Concrete / Cobalt (Light Mode)
+    Palette(bg="#E5E7EB", fg="#111827", accent="#2563EB", muted="#4B5563"),
+    # 4. Neo-Cobalt Midnight / Solar Gold
+    Palette(bg="#0A192F", fg="#F8FAFC", accent="#F59E0B", muted="#60A5FA"),
+    # 5. Solar Sand / Warm Ochre (Light Mode)
+    Palette(bg="#FEF3C7", fg="#451A03", accent="#D97706", muted="#92400E"),
+    # 6. Deep Velvet Plum / Neon Orchid
+    Palette(bg="#2E1035", fg="#FAF5FF", accent="#EC4899", muted="#C084FC"),
+    # 7. Editorial Charcoal / Electric Violet
+    Palette(bg="#18181B", fg="#FAFAFA", accent="#A855F7", muted="#A1A1AA"),
+]
+
+def generate_harmonic_palette(seed_text: str, mood_verb: str = "") -> Palette:
+    """
+    Procedurally generates an expressive, harmonic palette from text semantics and mood verb.
+    Categorizes emotional/domain mood to prevent palette collision across genres:
+    - Literary / Nocturne / Melodic -> Deep Emerald (#062C22) or Velvet Plum (#2E1035)
+    - Systems / Science / Architecture -> Architectural Cream (#F5F0E6) or Concrete (#E5E7EB)
+    - Velocity / Commercial / Action -> Warm Terracotta (#2A140E) or Solar Gold (#FEF3C7)
+    - Cyber / Modern Tech -> Neo-Cobalt (#0A192F) or Charcoal (#18181B)
+    STRICT BAN on hardcoded '#090A0F' navy fallback.
+    """
+    import hashlib
+    combined = f"{seed_text}_{mood_verb}".lower()
+
+    # 1. Nocturne / Lyric / Poetry / Organic
+    lyric_keywords = ["شب", "سکوت", "کویر", "ماه", "رقص", "ستاره", "عشق", "شعر", "دل", "ترانه", "موزیک", "آواز", "باران"]
+    if any(k in combined for k in lyric_keywords):
+        return HARMONIC_PALETTES[2]  # Deep Emerald (#062C22)
+
+    # 2. Systems / Governance / Academic / Structure
+    systems_keywords = ["سیستم", "غیرمتمرکز", "ساختار", "داده", "الگوریتم", "معماری", "توسعه", "علم", "تحلیل", "کنترل", "تصمیم"]
+    if any(k in combined for k in systems_keywords):
+        return HARMONIC_PALETTES[1]  # Architectural Cream Light (#F5F0E6)
+
+    # 3. Commercial / Speed / High-Tempo / Marketing
+    commercial_keywords = ["ثانیه", "فقط", "برند", "فروش", "سریع", "پول", "کسب", "جهانی", "میلیون", "تخفیف", "تبلیغ", "بازار"]
+    if any(k in combined for k in commercial_keywords):
+        return HARMONIC_PALETTES[0]  # Warm Terracotta (#2A140E)
+
+    # Fallback to high-dispersion SHA-256 hash
+    hash_int = int(hashlib.sha256(combined.encode("utf-8")).hexdigest(), 16)
+    idx = hash_int % len(HARMONIC_PALETTES)
+    base = HARMONIC_PALETTES[idx]
+    return Palette(bg=base.bg, fg=base.fg, accent=base.accent, muted=base.muted)
+
+@dataclass
+class LayerNode:
+    id: str
+    type: str  # "typography" | "vector_shape" | "clip_mask" | "kinetic_badge"
+    text: Optional[str] = None
+    weight: Optional[str] = "700"  # "300" | "500" | "700" | "900"
+    is_hero: bool = False
+    spatial_anchor: str = "center"  # "top_left" | "top_center" | "center" | "bottom_right"
+    action_verb: str = "reveal"  # "compress" | "invert" | "accrete" | "shatter" | "reconcile" | "reveal"
+    style: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "type": self.type,
+            "text": self.text,
+            "weight": self.weight,
+            "is_hero": self.is_hero,
+            "spatial_anchor": self.spatial_anchor,
+            "action_verb": self.action_verb,
+            "style": self.style
+        }
+
+@dataclass
+class SceneNode:
+    id: str
+    frame_range: List[int]  # [start_frame, end_frame]
+    camera_dynamic: str = "push"  # "push" | "pan_left" | "pan_right" | "drift" | "static"
+    entry_transition: str = "wipe"  # "wipe" | "cut" | "glitch" | "dissolve"
+    exit_transition: str = "cut"
+    layers: List[LayerNode] = field(default_factory=list)
+    narrative_beat: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "frame_range": self.frame_range,
+            "camera_dynamic": self.camera_dynamic,
+            "entry_transition": self.entry_transition,
+            "exit_transition": self.exit_transition,
+            "layers": [l.to_dict() for l in self.layers],
+            "narrative_beat": self.narrative_beat
+        }
+
+@dataclass
+class CompositionGraph:
+    meta: Dict[str, Any]
+    creative_dna: CreativeDNA
+    scenes: List[SceneNode]
+    audio_anchors: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "meta": self.meta,
+            "creative_dna": self.creative_dna.to_dict(),
+            "scenes": [s.to_dict() for s in self.scenes],
+            "audio_anchors": self.audio_anchors
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
+
+@dataclass
 class DesignSystem:
     concept: str
     palette: Palette
@@ -54,20 +188,24 @@ class SceneContent:
 @dataclass
 class Scene:
     id: str
-    layout: str  # "hero_focus" | "specimen_ladder" | "paragraph_stack" | "caption_panel"
+    layout: str  # "hero_focus" | "specimen_ladder" | "paragraph_stack" | "caption_panel" | "composition_graph"
     frame_range: List[int]  # [start_frame, end_frame]
     reveal: RevealConfig
     content: List[SceneContent]
     motion: Dict[str, Any] = field(default_factory=dict)
+    layers: Optional[List[LayerNode]] = None
+    camera_dynamic: str = "push"
 
 @dataclass
 class CreativeSpec:
     meta: Dict[str, Any]
     design_system: DesignSystem
     scenes: List[Scene]
+    creative_dna: Optional[CreativeDNA] = None
+    composition_graph: Optional[CompositionGraph] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "meta": self.meta,
             "design_system": asdict(self.design_system),
             "timeline": {
@@ -78,12 +216,19 @@ class CreativeSpec:
                         "frame_range": s.frame_range,
                         "reveal": asdict(s.reveal),
                         "content": [asdict(c) for c in s.content],
-                        "motion": s.motion
+                        "motion": s.motion,
+                        "layers": [l.to_dict() for l in s.layers] if s.layers else None,
+                        "camera_dynamic": s.camera_dynamic
                     }
                     for s in self.scenes
                 ]
             }
         }
+        if self.creative_dna:
+            d["creative_dna"] = self.creative_dna.to_dict()
+        if self.composition_graph:
+            d["composition_graph"] = self.composition_graph.to_dict()
+        return d
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)

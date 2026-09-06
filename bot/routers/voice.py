@@ -16,6 +16,7 @@ from bot.services.director import direct_scenes_with_llm, direct_creative_spec
 from bot.services.alignment import realign_transcript
 from bot.services.normalizer import normalize_persian_asr
 from bot.services.audit import WorkflowAudit, LOGS_DIR
+from bot.services.audio_adapter import AudioIntelligenceAdapter
 
 router = Router()
 
@@ -228,11 +229,16 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
     duration_frames = max(1, round(transcript["duration"] * 30))
 
     if profile_key == "swiss_clean":
+        # Extract audio prosody anchors in background worker
+        audio_anchors = await AudioIntelligenceAdapter.extract_audio_prosody_async(
+            ogg_path, transcript["words"], fps=30
+        )
         spec = direct_creative_spec(
             words=transcript["words"],
             fps=30,
             duration_sec=transcript["duration"],
-            audit=audit
+            audit=audit,
+            audio_anchors=audio_anchors
         )
         props = {
             "creativeSpec": spec.to_dict(),

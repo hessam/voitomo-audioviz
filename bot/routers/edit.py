@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 import sys
 sys.path.insert(0, "/root/workspace")
 from bot.services.alignment import parse_edit_command, patch_word
-from bot.services.director import direct_scenes_with_llm
+from bot.services.director import direct_scenes_with_llm, direct_creative_spec
 from bot.routers.voice import VoiceState
 
 router = Router()
@@ -38,16 +38,27 @@ async def handle_edit(message: Message, state: FSMContext):
 
     full_text = " ".join(w["word"] for w in patched_words)
     duration = patched_words[-1]["end"] if patched_words else 3.0
-    scenes = direct_scenes_with_llm(patched_words, full_text, duration)
+    duration_frames = max(1, round(duration * 30)) if patched_words else 90
 
-    props = {
-        "scenes": scenes,
-        "words": patched_words,
-        "text": full_text,
-        "audioSrc": audio_path,
-        "durationInFrames": max(1, round(duration * 30)) if patched_words else 90,
-        "profile": profile
-    }
+    if profile == "swiss_clean":
+        spec = direct_creative_spec(patched_words, fps=30, duration_sec=duration)
+        props = {
+            "creativeSpec": spec.to_dict(),
+            "words": patched_words,
+            "audioSrc": audio_path,
+            "durationInFrames": duration_frames,
+            "profile": profile
+        }
+    else:
+        scenes = direct_scenes_with_llm(patched_words, full_text, duration)
+        props = {
+            "scenes": scenes,
+            "words": patched_words,
+            "text": full_text,
+            "audioSrc": audio_path,
+            "durationInFrames": duration_frames,
+            "profile": profile
+        }
 
     try:
         async with aiohttp.ClientSession() as session:

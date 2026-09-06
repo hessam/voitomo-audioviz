@@ -1,5 +1,6 @@
 import React from "react";
 import { Composition } from "remotion";
+import "./fonts.css";
 import { VoiceMotion, DirectorProps } from "./Composition";
 import { SwissRuntime, SwissRuntimeProps } from "./runtime/SwissRuntime";
 

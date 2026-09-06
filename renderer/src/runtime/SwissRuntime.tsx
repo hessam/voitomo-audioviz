@@ -1,9 +1,21 @@
 import React from "react";
-import { Audio, useCurrentFrame, useVideoConfig } from "remotion";
+import { Audio, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { HeroFocus } from "./primitives/layouts/HeroFocus";
 import { SpecimenLadder } from "./primitives/layouts/SpecimenLadder";
 import { ParagraphStack } from "./primitives/layouts/ParagraphStack";
 import { CaptionPanel } from "./primitives/layouts/CaptionPanel";
+import { PersianText } from "./primitives/PersianText";
+
+export interface LayerNodeInput {
+  id: string;
+  type: string; // "typography" | "vector_shape" | "kinetic_badge" | "clip_mask"
+  text?: string;
+  weight?: string;
+  is_hero?: boolean;
+  spatial_anchor?: string;
+  action_verb?: string;
+  style?: Record<string, any>;
+}
 
 export interface CreativeSpecInput {
   meta?: {
@@ -12,6 +24,14 @@ export interface CreativeSpecInput {
     width?: number;
     height?: number;
     total_frames?: number;
+  };
+  creative_dna?: {
+    thesis?: string;
+    emotional_contradiction?: string;
+    metaphor_system?: string;
+    transformation_verbs?: string[];
+    palette?: { bg: string; fg: string; accent: string; muted: string };
+    font_family?: string;
   };
   design_system: {
     concept?: string;
@@ -31,12 +51,6 @@ export interface CreativeSpecInput {
       margin: number;
       columns?: number;
     };
-    motion_signature?: {
-      chunking?: string;
-      stagger_frames?: number;
-      reveal_direction?: string;
-      corruption_density?: number;
-    };
   };
   timeline: {
     scenes: Array<{
@@ -55,6 +69,8 @@ export interface CreativeSpecInput {
         weight?: string;
         is_hero?: boolean;
       }>;
+      layers?: LayerNodeInput[];
+      camera_dynamic?: string;
       motion?: Record<string, any>;
     }>;
   };
@@ -66,41 +82,251 @@ export interface SwissRuntimeProps {
   words?: Array<{ word: string; start: number; end: number }>;
 }
 
+/**
+ * Maps transformation verbs (compress, invert, accrete, shatter, reconcile)
+ * directly to Remotion physical spring/interpolate styles.
+ */
+function getVerbMotionStyle(
+  verb: string,
+  progress: number,
+  springVal: number,
+  accentColor: string,
+  fgColor: string
+): React.CSSProperties {
+  switch (verb) {
+    case "compress": {
+      // Elements converge under spatial pressure towards center with high spring tension
+      const scaleX = interpolate(progress, [0, 0.7, 1], [1.3, 0.95, 1.0], { extrapolateRight: "clamp" });
+      const scaleY = interpolate(progress, [0, 0.7, 1], [0.8, 1.05, 1.0], { extrapolateRight: "clamp" });
+      const letterSpacing = interpolate(progress, [0, 1], ["0.15em", "-0.015em"], { extrapolateRight: "clamp" });
+      return {
+        transform: `scale(${scaleX}, ${scaleY})`,
+        letterSpacing,
+      };
+    }
+    case "invert": {
+      // Dynamic contrast flip or polar tilt
+      const filter = progress < 0.45 ? "contrast(1.3)" : "none";
+      const rot = interpolate(progress, [0, 1], [-4, 0], { extrapolateRight: "clamp" });
+      return {
+        filter,
+        transform: `rotate(${rot}deg)`,
+      };
+    }
+    case "accrete": {
+      // Staggered geometric accumulation of mass and typography
+      const translateY = interpolate(progress, [0, 1], [40, 0], { extrapolateRight: "clamp" });
+      const opacity = interpolate(progress, [0, 0.3, 1], [0, 0.85, 1.0], { extrapolateRight: "clamp" });
+      return {
+        transform: `translateY(${translateY}px)`,
+        opacity,
+      };
+    }
+    case "shatter": {
+      // Controlled outward dispersal snapping into structural tension
+      const scale = interpolate(progress, [0, 0.35, 1], [0.88, 1.06, 1.0], { extrapolateRight: "clamp" });
+      const blur = interpolate(progress, [0, 1], [6, 0], { extrapolateRight: "clamp" });
+      return {
+        transform: `scale(${scale})`,
+        filter: blur > 0.2 ? `blur(${blur}px)` : "none",
+      };
+    }
+    case "reconcile": {
+      // Harmonious synthesis of previous opposing tensions into balanced stillness
+      const scale = interpolate(progress, [0, 0.8, 1], [0.95, 1.02, 1.0], { extrapolateRight: "clamp" });
+      const opacity = interpolate(progress, [0, 1], [0.2, 1.0], { extrapolateRight: "clamp" });
+      return {
+        transform: `scale(${scale})`,
+        opacity,
+      };
+    }
+    default:
+      return {};
+  }
+}
+
+/**
+ * Calculates camera translation and scale from camera_dynamic.
+ */
+function getCameraTransform(camera: string, progress: number): string {
+  switch (camera) {
+    case "push": {
+      const scale = interpolate(progress, [0, 1], [1.0, 1.07], { extrapolateRight: "clamp" });
+      return `scale(${scale})`;
+    }
+    case "pan_left": {
+      const x = interpolate(progress, [0, 1], [30, -30], { extrapolateRight: "clamp" });
+      return `translateX(${x}px)`;
+    }
+    case "pan_right": {
+      const x = interpolate(progress, [0, 1], [-30, 30], { extrapolateRight: "clamp" });
+      return `translateX(${x}px)`;
+    }
+    case "drift": {
+      const scale = interpolate(progress, [0, 1], [1.02, 1.06], { extrapolateRight: "clamp" });
+      const y = interpolate(progress, [0, 1], [12, -12], { extrapolateRight: "clamp" });
+      return `scale(${scale}) translateY(${y}px)`;
+    }
+    case "static":
+    default:
+      return "none";
+  }
+}
+
 export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioSrc, words = [] }) => {
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
 
-  // Fallback defaults if creativeSpec is missing (100% dynamic, zero hardcoded content)
+  // Design system with procedural harmonic palette
   const ds = creativeSpec?.design_system ?? {
-    concept: "Swiss Kinetic Specimen",
-    palette: { bg: "#0A0B0E", fg: "#F8FAFC", accent: "#E11D48", muted: "#64748B" },
-    type_scale: { family: "Vazirmatn, sans-serif", weights: ["300", "500", "700", "900"], ratio: 1.333 },
-    grid: { alignment: "left", margin: 80, columns: 12 },
+    concept: creativeSpec?.creative_dna?.metaphor_system || "Architectural Kinetic Specimen",
+    palette: creativeSpec?.creative_dna?.palette || { bg: "#1C1412", fg: "#F7F1ED", accent: "#E05638", muted: "#8C7D75" },
+    type_scale: { family: creativeSpec?.creative_dna?.font_family || "Dana, Vazirmatn, sans-serif", weights: ["300", "500", "700", "900"], ratio: 1.333 },
+    grid: { alignment: "center", margin: 80, columns: 12 },
   };
 
+  const fontFamily = creativeSpec?.creative_dna?.font_family || ds.type_scale.family || "Dana, Vazirmatn, sans-serif";
   const scenes = creativeSpec?.timeline?.scenes ?? [];
   const totalFrames = creativeSpec?.meta?.total_frames || 300;
-  const totalSec = (totalFrames / fps).toFixed(1);
-  const currentSec = (frame / fps).toFixed(1);
 
-  // Determine active scene based on current frame
+  // Active scene selection
   let activeSceneIdx = scenes.findIndex((s) => frame >= s.frame_range[0] && frame < s.frame_range[1]);
   if (activeSceneIdx === -1 && scenes.length > 0) {
     activeSceneIdx = frame < scenes[0].frame_range[0] ? 0 : scenes.length - 1;
   }
   const activeScene = scenes[activeSceneIdx];
 
-  const margin = ds.grid.margin || 80;
-  const isExiting = activeScene ? (activeScene.frame_range[1] - frame) <= 15 : false;
-  const currentTime = frame / fps;
+  const startFrame = activeScene?.frame_range[0] ?? 0;
+  const endFrame = activeScene?.frame_range[1] ?? totalFrames;
+  const sceneDuration = Math.max(1, endFrame - startFrame);
+  const relFrame = Math.max(0, frame - startFrame);
+  const sceneProgress = Math.min(1, relFrame / sceneDuration);
 
-  const renderLayout = () => {
-    if (!activeScene) {
+  // Remotion spring calculation for punchy physics
+  const springVal = spring({
+    frame: relFrame,
+    fps,
+    config: { damping: 14, mass: 0.8, stiffness: 120 },
+  });
+
+  const isExiting = activeScene ? (endFrame - frame) <= 12 : false;
+  const currentTime = frame / fps;
+  const cameraDynamic = activeScene?.camera_dynamic || "push";
+  const cameraTransform = getCameraTransform(cameraDynamic, sceneProgress);
+
+  // Render Scene-Shot-Layer Graph IR if layers exist
+  const renderGraphLayers = () => {
+    if (!activeScene || !activeScene.layers || activeScene.layers.length === 0) {
       return null;
     }
 
-    const startFrame = activeScene.frame_range[0];
-    const endFrame = activeScene.frame_range[1];
+    return (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: "80px",
+          boxSizing: "border-box",
+          direction: "rtl",
+        }}
+      >
+        {activeScene.layers.map((layer, lIdx) => {
+          const actionVerb = layer.action_verb || creativeSpec?.creative_dna?.transformation_verbs?.[0] || "reveal";
+          const verbStyle = getVerbMotionStyle(actionVerb, sceneProgress, springVal, ds.palette.accent, ds.palette.fg);
+          const isHero = layer.is_hero || lIdx === 0;
+
+          if (layer.type === "kinetic_badge") {
+            return (
+              <div
+                key={layer.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "6px 18px",
+                  borderRadius: "999px",
+                  border: `1px solid ${ds.palette.accent}55`,
+                  backgroundColor: `${ds.palette.accent}18`,
+                  color: ds.palette.accent,
+                  fontSize: "18px",
+                  fontWeight: 700,
+                  fontFamily,
+                  marginBottom: "24px",
+                  ...verbStyle,
+                }}
+              >
+                <span>✦</span>
+                <PersianText
+                  text={layer.text || ""}
+                  fontFamily={fontFamily}
+                  fontSize="18px"
+                  fontWeight={700}
+                  color={ds.palette.accent}
+                  startFrame={startFrame + (lIdx * 3)}
+                  durationInFrames={16}
+                />
+              </div>
+            );
+          }
+
+          if (layer.type === "vector_shape") {
+            return (
+              <div
+                key={layer.id}
+                style={{
+                  width: "90px",
+                  height: "3px",
+                  backgroundColor: ds.palette.accent,
+                  margin: "18px 0",
+                  ...verbStyle,
+                }}
+              />
+            );
+          }
+
+          // Typography layer
+          const textLen = (layer.text || "").length;
+          const fontSize = isHero
+            ? textLen <= 15 ? 84 : textLen <= 30 ? 68 : textLen <= 50 ? 56 : 46
+            : 32;
+
+          return (
+            <div
+              key={layer.id}
+              style={{
+                textAlign: "center",
+                margin: isHero ? "12px 0" : "8px 0",
+                ...verbStyle,
+              }}
+            >
+              <PersianText
+                text={layer.text || ""}
+                fontFamily={fontFamily}
+                fontSize={fontSize}
+                fontWeight={layer.weight || (isHero ? 900 : 500)}
+                color={isHero ? ds.palette.fg : ds.palette.muted}
+                startFrame={startFrame + (lIdx * 4)}
+                durationInFrames={20}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Fallback layout renderer for standard scenes
+  const renderLayout = () => {
+    if (!activeScene) return null;
+
+    // Prefer Graph IR layers
+    if (activeScene.layers && activeScene.layers.length > 0) {
+      return renderGraphLayers();
+    }
 
     const commonProps = {
       content: activeScene.content,
@@ -135,127 +361,23 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
         backgroundColor: ds.palette.bg,
         position: "relative",
         overflow: "hidden",
-        fontFamily: ds.type_scale.family || "Vazirmatn, sans-serif",
+        fontFamily,
       }}
     >
       {audioSrc && <Audio src={audioSrc} />}
 
-      {/* Swiss Architectural Outer Margin Grid Box */}
+      {/* Dynamic Motion Viewport with Camera Dynamic Transforms */}
       <div
         style={{
-          position: "absolute",
-          top: `${margin - 24}px`,
-          bottom: `${margin - 24}px`,
-          left: `${margin - 24}px`,
-          right: `${margin - 24}px`,
-          border: `1px solid ${ds.palette.fg}14`,
-          pointerEvents: "none",
-          zIndex: 10,
+          width: "100%",
+          height: "100%",
+          position: "relative",
+          zIndex: 5,
+          transform: cameraTransform,
+          transition: "transform 0.05s linear",
         }}
       >
-        {/* Corner Crosshair Registration Marks */}
-        <span style={{ position: "absolute", top: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", top: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", bottom: -8, left: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-        <span style={{ position: "absolute", bottom: -8, right: -5, fontSize: 13, color: ds.palette.muted, opacity: 0.6, fontFamily: "monospace" }}>+</span>
-      </div>
-
-      {/* Top Technical Header HUD */}
-      <div
-        style={{
-          position: "absolute",
-          top: "28px",
-          left: `${margin}px`,
-          right: `${margin}px`,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          fontSize: 13,
-          fontFamily: "monospace, sans-serif",
-          color: ds.palette.muted,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-          zIndex: 20,
-        }}
-      >
-        {/* Timecode & Alignment */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", whiteSpace: "nowrap" }}>
-          <span style={{ color: ds.palette.accent, fontWeight: 900 }}>● REC</span>
-          <span>{currentSec}s / {totalSec}s</span>
-          <span style={{ opacity: 0.35 }}>|</span>
-          <span>ALIGN // {ds.grid.alignment.toUpperCase()}</span>
-        </div>
-
-        {/* Scene Indicator */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 700, whiteSpace: "nowrap" }}>
-          <span style={{ color: ds.palette.fg }}>
-            SCENE [{String(activeSceneIdx + 1).padStart(2, "0")}/{String(scenes.length || 1).padStart(2, "0")}]
-          </span>
-          <span style={{ color: ds.palette.accent }}>
-            // {activeScene?.layout.toUpperCase().replace("_", " ") || "HERO"}
-          </span>
-        </div>
-
-        {/* Specimen Tag */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
-          <span>VAZIRMATN</span>
-          <span style={{ opacity: 0.4 }}>[1080×1080]</span>
-        </div>
-      </div>
-
-      {/* Active Scene Layout */}
-      <div style={{ width: "100%", height: "100%", position: "relative", zIndex: 5 }}>
         {renderLayout()}
-      </div>
-
-      {/* Bottom Technical Footer HUD */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: "26px",
-          left: `${margin}px`,
-          right: `${margin}px`,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          fontSize: 13,
-          fontFamily: "monospace, sans-serif",
-          color: ds.palette.muted,
-          letterSpacing: "0.06em",
-          zIndex: 20,
-        }}
-      >
-        {/* Concept Moniker */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", maxWidth: "450px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          <span style={{ color: ds.palette.accent, fontWeight: 900 }}>ARCHIVE:</span>
-          <span style={{ color: ds.palette.fg, opacity: 0.85 }}>{ds.concept || "SWISS KINETIC SPECIMEN"}</span>
-        </div>
-
-        {/* Dynamic Audio Rhythmic Tick Meter */}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "14px" }}>
-          {[35, 70, 25, 90, 50, 85, 30, 95, 60, 40, 80, 20, 75, 45].map((h, i) => {
-            const dynamicH = Math.max(15, Math.min(100, h + Math.sin((frame + i * 4) * 0.35) * 35));
-            return (
-              <span
-                key={i}
-                style={{
-                  width: "2px",
-                  height: `${dynamicH}%`,
-                  backgroundColor: i % 4 === 0 ? ds.palette.accent : `${ds.palette.fg}44`,
-                  display: "inline-block",
-                  transition: "height 0.08s ease",
-                }}
-              />
-            );
-          })}
-        </div>
-
-        {/* Frame Readout */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span>FRM: {String(frame).padStart(4, "0")} / {String(totalFrames).padStart(4, "0")}</span>
-          <span style={{ color: ds.palette.accent }}>[30 FPS]</span>
-        </div>
       </div>
     </div>
   );

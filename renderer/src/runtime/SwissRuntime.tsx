@@ -98,10 +98,10 @@ function getVerbMotionStyle(
       // Elements converge under spatial pressure towards center with high spring tension
       const scaleX = interpolate(progress, [0, 0.7, 1], [1.3, 0.95, 1.0], { extrapolateRight: "clamp" });
       const scaleY = interpolate(progress, [0, 0.7, 1], [0.8, 1.05, 1.0], { extrapolateRight: "clamp" });
-      const letterSpacing = interpolate(progress, [0, 1], ["0.15em", "-0.015em"], { extrapolateRight: "clamp" });
+      const ls = interpolate(progress, [0, 1], [0.15, -0.015], { extrapolateRight: "clamp" });
       return {
         transform: `scale(${scaleX}, ${scaleY})`,
-        letterSpacing,
+        letterSpacing: `${ls}em`,
       };
     }
     case "invert": {

@@ -387,6 +387,7 @@ export const KineticPosterWorld: React.FC<{
       {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
         const sText =
           s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+          s.layers?.[0]?.text ||
           s.content?.find((c: any) => c.is_hero)?.text ||
           s.content?.[0]?.text ||
           "";
@@ -503,6 +504,7 @@ export const EditorialWorld: React.FC<{
         {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
           const sText =
             s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+            s.layers?.[0]?.text ||
             s.content?.find((c: any) => c.is_hero)?.text ||
             s.content?.[0]?.text ||
             "";
@@ -648,6 +650,7 @@ export const PopBentoWorld: React.FC<{
             {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
               const sText =
                 s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+                s.layers?.[0]?.text ||
                 s.content?.find((c: any) => c.is_hero)?.text ||
                 s.content?.[0]?.text ||
                 "";
@@ -741,6 +744,7 @@ export const PopBentoWorld: React.FC<{
           {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
             const sText =
               s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+              s.layers?.[0]?.text ||
               s.content?.find((c: any) => c.is_hero)?.text ||
               s.content?.[0]?.text ||
               "";

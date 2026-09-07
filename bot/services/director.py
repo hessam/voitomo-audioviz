@@ -563,6 +563,50 @@ def classify_visual_world(
     return "pop-bento"
 
 
+def parse_and_validate_llm_palette(raw: Any, fallback_text: str, fallback_thesis: str) -> Palette:
+    """
+    Validates LLM-proposed palette:
+    - Must be dict with valid hex bg, fg, accent, muted
+    - bg must not be brown sludge (is_banned_sludge_color)
+    - contrast between bg and fg must be legible (light vs dark)
+    Falls back to generate_harmonic_palette if invalid.
+    """
+    if isinstance(raw, dict):
+        bg = str(raw.get("bg", "")).strip().upper()
+        fg = str(raw.get("fg", "")).strip().upper()
+        accent = str(raw.get("accent", "")).strip().upper()
+        muted = str(raw.get("muted", "")).strip().upper()
+
+        hex_regex = r"^#[0-9A-F]{6}$"
+        if re.match(hex_regex, bg) and re.match(hex_regex, fg):
+            if not is_banned_sludge_color(bg):
+                def get_lum(h: str) -> float:
+                    r = int(h[1:3], 16) / 255.0
+                    g = int(h[3:5], 16) / 255.0
+                    b = int(h[5:7], 16) / 255.0
+                    return 0.299 * r + 0.587 * g + 0.114 * b
+
+                lum_bg = get_lum(bg)
+                lum_fg = get_lum(fg)
+
+                if abs(lum_bg - lum_fg) >= 0.35:
+                    is_light_bg = lum_bg > 0.55
+                    tape_bg = "#111111" if is_light_bg else "#FFFFFF"
+                    tape_text = "#FFFFFF" if is_light_bg else "#000000"
+
+                    return Palette(
+                        bg=bg,
+                        fg=fg,
+                        accent=accent if re.match(hex_regex, accent) else ("#0047FF" if is_light_bg else "#D4FF00"),
+                        muted=muted if re.match(hex_regex, muted) else ("#71717A" if is_light_bg else "#9CA3AF"),
+                        tape_bg=tape_bg,
+                        tape_text=tape_text,
+                        shadow_block="#000000"
+                    )
+
+    return generate_harmonic_palette(fallback_text, fallback_thesis)
+
+
 def synthesize_creative_dna(
     full_text: str,
     duration: float,
@@ -592,7 +636,7 @@ def synthesize_creative_dna(
         "4. 'transformation_verbs': Select 2 to 4 verbs from ['compress', 'invert', 'accrete', 'shatter', 'reconcile'].\n"
         "5. 'font_family': 'Dana' for commercial/tech/punchy modern shorts, or 'Vazirmatn' for thoughtful narrative editorial.\n"
         "6. 'palette': High-contrast 4-color palette {'bg': '#HEX', 'fg': '#HEX', 'accent': '#HEX', 'muted': '#HEX'}.\n"
-        "   STRICT BAN ON HARDCODED NAVY: NEVER default to '#090A0F'! Explore warm terracotta, architectural ink/cream, cyber emerald, deep forest amber, or velvet plum.\n"
+        "   STRICT BAN ON HARDCODED NAVY: NEVER default to '#090A0F'! Explore warm terracotta (#18181A / #C84B31), architectural cream (#F4F1EA / #002FA7), cyber emerald (#081C15 / #00E599), tangerine void (#0A192F / #FF5722), or velvet plum (#1E0826 / #FF2A6D).\n"
         "   Ensure contrast between bg and fg exceeds 4.5:1 (WCAG AA).\n\n"
         "Output ONLY pure JSON conforming to this schema:\n"
         "{\n"
@@ -601,7 +645,7 @@ def synthesize_creative_dna(
         '  "metaphor_system": "...",\n'
         '  "transformation_verbs": ["compress", "accrete", "reconcile"],\n'
         '  "font_family": "Dana",\n'
-        '  "palette": {"bg": "#5537ED", "fg": "#FFFFFF", "accent": "#D4FF00", "muted": "#E0E7FF"}\n'
+        '  "palette": {"bg": "#18181A", "fg": "#F5EBE6", "accent": "#C84B31", "muted": "#A1A1AA"}\n'
         "}"
     )
 
@@ -634,10 +678,8 @@ def synthesize_creative_dna(
             content = content.strip()
 
         parsed = json.loads(content)
-        # Enforce Hardcoded Safe Palette Engine:
-        # Strictly bans brown sludge (#211513, etc.) and picks from verified benchmark palettes:
-        # Studio Concrete (#B8B9BA), Electric Cobalt (#5537ED), or Signal Acid (#0E0F12)
-        clean_palette = generate_harmonic_palette(full_text, parsed.get("thesis", ""))
+        # Parse and validate LLM authored palette; fallback to curated harmonic engine if invalid
+        clean_palette = parse_and_validate_llm_palette(parsed.get("palette"), full_text, parsed.get("thesis", ""))
 
         dna = CreativeDNA(
             thesis=sanitize_anti_slop(parsed.get("thesis", "Bespoke Typographic Narrative")),
@@ -648,7 +690,7 @@ def synthesize_creative_dna(
             font_family=parsed.get("font_family", "Dana"),
             world=world
         )
-        logger.info(f"✅ Stage 1 CreativeDNA Synthesized: {dna.metaphor_system} (world: {dna.world}, verbs: {dna.transformation_verbs})")
+        logger.info(f"✅ Stage 1 CreativeDNA Synthesized: {dna.metaphor_system} (world: {dna.world}, verbs: {dna.transformation_verbs}, bg: {dna.palette.bg})")
         return dna
     except Exception as e:
         logger.warning(f"Stage 1 CreativeDNA synthesis failed ({e}), falling back to procedural generation.")

@@ -5,7 +5,7 @@ export interface TapeStripProps {
   text: string;
   isBlack?: boolean;
   isEmphasis?: boolean;
-  fontSize?: number | string | "body" | "emphasis";
+  fontSize?: number | string | "body" | "emphasis" | "compact";
   startFrame?: number;
   durationInFrames?: number;
   stressFrame?: number;
@@ -13,27 +13,35 @@ export interface TapeStripProps {
   style?: React.CSSProperties;
   className?: string;
   tiltAngle?: number;
+  tapeBg?: string;
+  tapeText?: string;
+  singleLine?: boolean;
+  maxLines?: number;
 }
 
-export function getLines(text: string): string[] {
+export function getLines(text: string, maxLines: number = 2, forceSingleLine: boolean = false): string[] {
   if (!text) return [];
   if (text.includes("\n")) {
-    return text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const split = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    return split.slice(0, maxLines);
   }
-  const words = text.trim().split(/\s+/);
-  // Short punchy phrase (1-3 words and <= 18 chars): single snug strip
-  if (words.length <= 3 && text.length <= 18) {
+  if (forceSingleLine) {
     return [text.trim()];
   }
-  // If 4-5 words: 2 balanced snug lines
-  if (words.length <= 5) {
+  const words = text.trim().split(/\s+/);
+  // Concise punchy phrase (up to 5 words and <= 32 chars): single snug strip
+  if (words.length <= 5 && text.length <= 32) {
+    return [text.trim()];
+  }
+  // Up to 8 words: 2 balanced snug lines
+  if (words.length <= 8 || maxLines <= 2) {
     const mid = Math.ceil(words.length / 2);
     return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
   }
-  // If 6+ words: 2 or 3 lines of 2-3 words each
+  // 9+ words: up to maxLines
   const lines: string[] = [];
-  const chunkSize = Math.ceil(words.length / (words.length >= 7 ? 3 : 2));
-  for (let i = 0; i < words.length; i += chunkSize) {
+  const chunkSize = Math.ceil(words.length / maxLines);
+  for (let i = 0; i < words.length && lines.length < maxLines; i += chunkSize) {
     lines.push(words.slice(i, i + chunkSize).join(" "));
   }
   return lines;
@@ -51,19 +59,31 @@ export const TapeStrip: React.FC<TapeStripProps> = ({
   style = {},
   className = "",
   tiltAngle = 0,
+  tapeBg,
+  tapeText,
+  singleLine = false,
+  maxLines = 2,
 }) => {
   const frame = useCurrentFrame();
   const relFrame = Math.max(0, frame - startFrame);
 
-  const lines = getLines(text);
+  const lines = getLines(text, maxLines, singleLine);
 
-  // Law 1: Strict 2-Size Type System (Body = 58px, Emphasis = 84px)
+  // Dynamic Type System (Compact = 46/66px, Body = 58px, Emphasis = 84px)
   const isEmphasisResolved =
     isEmphasis === true ||
     fontSize === "emphasis" ||
     fontSize === 84 ||
     (typeof fontSize === "number" && fontSize >= 75);
-  const resolvedFontSize = isEmphasisResolved ? 84 : 58;
+
+  let resolvedFontSize = 58;
+  if (fontSize === "compact") {
+    resolvedFontSize = isEmphasisResolved ? 66 : 46;
+  } else if (typeof fontSize === "number") {
+    resolvedFontSize = fontSize;
+  } else if (isEmphasisResolved) {
+    resolvedFontSize = 84;
+  }
 
   // Law 2: Vocal Stress Morphing
   // Smooth 1.0 -> 1.08 -> 1.0 scale pulse around vocal stress peak
@@ -135,6 +155,14 @@ export const TapeStrip: React.FC<TapeStripProps> = ({
         // Subtle alternating angle jitter (-0.8deg, +0.8deg) for tactile sticker look
         const lineTilt = tiltAngle + (lineIdx % 2 === 0 ? -0.8 : 0.8);
 
+        const isCompact = resolvedFontSize <= 52;
+        const isMedium = resolvedFontSize <= 72;
+        const lineMargin = isCompact ? "2px 0" : isMedium ? "4px 0" : "6px 0";
+        const shadowOffset = isCompact ? "6px 6px 0px 0px #000000" : isMedium ? "8px 8px 0px 0px #000000" : "10px 10px 0px 0px #000000";
+        const textPadding = isCompact ? "8px 20px 10px" : isMedium ? "10px 24px 14px" : "14px 32px 18px";
+        const bgResolved = isThisLineBlack ? "#000000" : (tapeBg || "#FFFFFF");
+        const textResolved = isThisLineBlack ? "#FFFFFF" : (tapeText || "#000000");
+
         return (
           <div
             key={`${lineIdx}_${lineText}`}
@@ -146,7 +174,7 @@ export const TapeStrip: React.FC<TapeStripProps> = ({
               justifyContent: "center",
               width: "fit-content",
               alignSelf: "center",
-              margin: isEmphasisResolved ? "6px 0" : "4px 0",
+              margin: lineMargin,
               transform: `rotate(${lineTilt}deg)`,
               transformOrigin: "center center",
               opacity: enterOpacity,
@@ -158,8 +186,8 @@ export const TapeStrip: React.FC<TapeStripProps> = ({
               style={{
                 position: "absolute",
                 inset: 0,
-                background: isThisLineBlack ? "#000000" : "#FFFFFF",
-                boxShadow: "10px 10px 0px 0px #000000",
+                background: bgResolved,
+                boxShadow: shadowOffset,
                 transform: `scaleX(${tapeScaleX})`,
                 transformOrigin: "center center",
                 borderRadius: "0px",
@@ -178,8 +206,8 @@ export const TapeStrip: React.FC<TapeStripProps> = ({
                 display: "inline-block",
                 transform: `scale(${textZoom * stressScale * exitZoom})`,
                 transformOrigin: "center center",
-                color: isThisLineBlack ? "#FFFFFF" : "#000000",
-                padding: isEmphasisResolved ? "14px 32px 18px" : "10px 24px 14px",
+                color: textResolved,
+                padding: textPadding,
                 fontFamily,
                 fontWeight: 800,
                 fontSize: `${resolvedFontSize}px`,

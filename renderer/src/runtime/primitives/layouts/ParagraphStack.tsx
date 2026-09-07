@@ -37,7 +37,7 @@ export const ParagraphStack: React.FC<ParagraphStackProps> = ({
   const sceneFrame = Math.max(0, frame - startFrame);
   const totalSceneFrames = Math.max(1, endFrame - startFrame);
 
-  const fontFamily = designSystem.type_scale.family || "Vazirmatn, sans-serif";
+  const fontFamily = designSystem?.type_scale?.family || "Vazirmatn, sans-serif";
   const fgColor = designSystem.palette.fg;
   const accentColor = designSystem.palette.accent;
   const mutedColor = designSystem.palette.muted;

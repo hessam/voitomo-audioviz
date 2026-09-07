@@ -86,24 +86,27 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
 
         // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
         const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-        const isEmphasis = isCurrent || isHero;
-        const fontSize = isEmphasis ? 84 : 58;
-        const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
+        const isEmphasis = isCurrent && isHero;
+        // Inverted accent: Alternate white and black strips; emphasis punchlines get Black Tape!
+        const isBlack = isHero || idx % 2 === 1;
+        const fontSize = isHero ? 84 : 58;
+        const tiltAngle = idx % 2 === 0 ? -1.2 : 1.2;
 
         return (
           <TapeStrip
             key={s.id || idx}
             text={sText}
-            isBlack={!isCurrent}
-            isEmphasis={isEmphasis}
+            isBlack={isBlack}
+            isEmphasis={isHero}
             fontSize={fontSize}
             fontFamily={fontFamily}
             startFrame={sStart}
             durationInFrames={sDuration}
             tiltAngle={tiltAngle}
-            style={{ margin: isEmphasis ? "12px 0" : "8px 0" }}
+            style={{ margin: isHero ? "10px 0" : "6px 0" }}
           />
         );
+
       })}
     </div>
   );

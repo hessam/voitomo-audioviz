@@ -397,22 +397,24 @@ export const KineticPosterWorld: React.FC<{
 
         // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
         const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-        const isEmphasis = isCurrent || isHero;
-        const fontSize = isEmphasis ? 84 : 58;
-        const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
+        const isEmphasis = isCurrent && isHero;
+        // Task 2: Inverted Accent Tape Strips: Alternate white/black; punchlines get Black Tape!
+        const isBlack = isHero || idx % 2 === 1;
+        const fontSize = isHero ? 84 : 58;
+        const tiltAngle = idx % 2 === 0 ? -1.2 : 1.2;
 
         return (
           <TapeStrip
             key={s.id || idx}
             text={sText}
-            isBlack={!isCurrent}
-            isEmphasis={isEmphasis}
+            isBlack={isBlack}
+            isEmphasis={isHero}
             fontSize={fontSize}
             fontFamily={fontFamily}
             startFrame={sStart}
             durationInFrames={sDuration}
             tiltAngle={tiltAngle}
-            style={{ margin: isEmphasis ? "14px 0" : "10px 0" }}
+            style={{ margin: isHero ? "10px 0" : "6px 0" }}
           />
         );
       })}
@@ -511,26 +513,29 @@ export const EditorialWorld: React.FC<{
 
           // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
           const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-          const isEmphasis = isCurrent || isHero;
-          const fontSize = isEmphasis ? 84 : 58;
-          const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
+          const isEmphasis = isCurrent && isHero;
+          // Task 2: Inverted Accent Tape Strips: Alternate white/black; punchlines get Black Tape!
+          const isBlack = isHero || idx % 2 === 1;
+          const fontSize = isHero ? 84 : 58;
+          const tiltAngle = idx % 2 === 0 ? -1.2 : 1.2;
 
           return (
             <TapeStrip
               key={s.id || idx}
               text={sText}
-              isBlack={!isCurrent}
-              isEmphasis={isEmphasis}
+              isBlack={isBlack}
+              isEmphasis={isHero}
               fontSize={fontSize}
               fontFamily={fontFamily}
               startFrame={sStart}
               durationInFrames={sDuration}
               tiltAngle={tiltAngle}
-              style={{ margin: isEmphasis ? "14px 0" : "10px 0" }}
+              style={{ margin: isHero ? "10px 0" : "6px 0" }}
             />
           );
         })}
       </div>
+
 
 
       {/* Minimal Subtitle HUD Progress Bar */}
@@ -651,21 +656,22 @@ export const PopBentoWorld: React.FC<{
               const sEnd = s.frame_range[1] ?? (sStart + 45);
               const sDuration = Math.max(1, sEnd - sStart);
               const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-              const isEmphasis = isCurrent || isHero;
-              const fontSize = isEmphasis ? 84 : 58;
+              const isBlack = isHero || idx % 2 === 1;
+              const fontSize = isHero ? 84 : 58;
               const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
               return (
                 <TapeStrip
                   key={s.id || idx}
                   text={sText}
-                  isBlack={!isCurrent}
-                  isEmphasis={isEmphasis}
+                  isBlack={isBlack}
+                  isEmphasis={isHero}
                   fontSize={fontSize}
                   fontFamily={fontFamily}
                   startFrame={sStart}
                   durationInFrames={sDuration}
                   tiltAngle={tiltAngle}
+                  style={{ margin: isHero ? "10px 0" : "6px 0" }}
                 />
               );
             })}
@@ -743,22 +749,22 @@ export const PopBentoWorld: React.FC<{
             const sEnd = s.frame_range[1] ?? (sStart + 45);
             const sDuration = Math.max(1, sEnd - sStart);
             const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-            const isEmphasis = isCurrent || isHero;
-            const fontSize = isEmphasis ? 84 : 58;
+            const isBlack = isHero || idx % 2 === 1;
+            const fontSize = isHero ? 84 : 58;
             const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
             return (
               <TapeStrip
                 key={s.id || idx}
                 text={sText}
-                isBlack={!isCurrent}
-                isEmphasis={isEmphasis}
+                isBlack={isBlack}
+                isEmphasis={isHero}
                 fontSize={fontSize}
                 fontFamily={fontFamily}
                 startFrame={sStart}
                 durationInFrames={sDuration}
                 tiltAngle={tiltAngle}
-                style={{ margin: isEmphasis ? "14px 0" : "10px 0" }}
+                style={{ margin: isHero ? "12px 0" : "8px 0" }}
               />
             );
           })}

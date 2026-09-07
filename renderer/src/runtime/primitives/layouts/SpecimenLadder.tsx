@@ -37,7 +37,7 @@ export const SpecimenLadder: React.FC<SpecimenLadderProps> = ({
   const sceneFrame = Math.max(0, frame - startFrame);
   const totalSceneFrames = Math.max(1, endFrame - startFrame);
 
-  const fontFamily = designSystem.type_scale.family || "Vazirmatn, sans-serif";
+  const fontFamily = designSystem?.type_scale?.family || "Vazirmatn, sans-serif";
   const defaultWeights = ["300", "500", "700", "900"];
   const fgColor = designSystem.palette.fg;
   const accentColor = designSystem.palette.accent;

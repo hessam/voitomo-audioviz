@@ -21,9 +21,11 @@ ALLOWED_LAYOUTS = ["kinetic_poster", "statement_stack", "split_viewport", "bento
 
 def enforce_layout_diversity(scenes: List[Any], is_music: bool = False) -> List[Any]:
     """
-    Enforces strict layout diversity rules across scenes:
+    Enforces strict layout rules:
     1. Music / Poetry: Always kinetic_poster, strictly bans bento_grid, metric_punch, split_viewport.
-    2. Educational / Voice: Guarantees alternation, prevents consecutive duplicates, ensures >= 3 archetypes.
+    2. Educational / Voice:
+       - Strictly gates bento_grid (only when enumeration asset is present).
+       - Prevents consecutive duplicates, ensures >= 3 typographic archetypes.
     """
     if not scenes:
         return scenes
@@ -33,11 +35,16 @@ def enforce_layout_diversity(scenes: List[Any], is_music: bool = False) -> List[
             s.layout = "kinetic_poster"
         return scenes
 
-    alternatives = ["statement_stack", "split_viewport", "metric_punch", "specimen_ladder", "hero_focus"]
+    # Pure typographic alternatives (zero random vector graphics)
+    alternatives = ["statement_stack", "metric_punch", "hero_focus", "specimen_ladder", "split_viewport"]
 
     # Pass 1: Normalize layouts and mutate consecutive duplicates
     for i in range(len(scenes)):
         curr = getattr(scenes[i], "layout", None)
+        if curr == "bento_grid" and not getattr(scenes[i], "asset", None):
+            curr = "statement_stack"
+            scenes[i].layout = curr
+
         if not curr or curr not in ALLOWED_LAYOUTS:
             curr = alternatives[i % len(alternatives)]
             scenes[i].layout = curr
@@ -52,7 +59,7 @@ def enforce_layout_diversity(scenes: List[Any], is_music: bool = False) -> List[
     if len(scenes) >= 4:
         distinct = set(getattr(s, "layout", "") for s in scenes)
         if len(distinct) < 3:
-            pattern = ["statement_stack", "metric_punch", "split_viewport", "hero_focus", "specimen_ladder"]
+            pattern = ["statement_stack", "metric_punch", "hero_focus", "specimen_ladder", "split_viewport"]
             for i in range(len(scenes)):
                 scenes[i].layout = pattern[i % len(pattern)]
 
@@ -64,6 +71,7 @@ def enforce_layout_diversity(scenes: List[Any], is_music: bool = False) -> List[
             scenes[i].layout = candidates[0]
 
     return scenes
+
 
 def post_json(url: str, headers: dict, payload: dict, timeout: int = 30) -> dict:
     """Robust HTTP POST supporting requests or standard urllib."""
@@ -660,6 +668,36 @@ def synthesize_creative_dna(
     )
 
 
+def is_explicit_enumeration(phrase_text: str) -> bool:
+    """
+    Law 5: The Narration-Gated Graphic Gate.
+    Strict ban on decorative random vectors.
+    Vector grids are FORBIDDEN unless speech explicitly enumerates items or tools
+    (e.g., 'Three features', '100 to 200 interviews', 'این ۳ ابزار', 'چندین مرحله').
+    """
+    if not phrase_text:
+        return False
+    t = phrase_text.lower().strip()
+
+    # Numerical ranges (e.g. 100 to 200, ۱۰۰ تا ۲۰۰)
+    if re.search(r"(?:100|200|\d+|[۰-۹]+)\s*(?:تا|to)\s*(?:100|200|\d+|[۰-۹]+)", t):
+        return True
+
+    # Count + items/tools/features
+    if re.search(r"(?:سه|چهار|پنج|شش|هفت|هشت|نه|ده|\d+|[۰-۹]+)\s*(?:ویژگی|ابزار|آیتم|مورد|راهکار|مرحله|نکته|فاکتور|feature|tool|item|step)", t):
+        return True
+
+    # Explicit listing phrases
+    listing_phrases = [
+        "چند ابزار", "لیست ابزار", "چند ویژگی", "سه ویژگی", "چهار ویژگی", "چند نکته",
+        "این موارد", "چندین مورد", "چند مرحله", "three features", "multiple tools"
+    ]
+    if any(lp in t for lp in listing_phrases):
+        return True
+
+    return False
+
+
 def derive_phrase_layout(phrase_text: str, is_music: bool = False) -> str:
     """
     Branch Layout by Audio Type and Narrative Intent:
@@ -672,6 +710,9 @@ def derive_phrase_layout(phrase_text: str, is_music: bool = False) -> str:
     """
     if is_music:
         return "kinetic_poster"
+
+    if is_explicit_enumeration(phrase_text):
+        return "bento_grid"
 
     # 1. Numbers / Percentages
     num_markers = [
@@ -694,6 +735,7 @@ def derive_phrase_layout(phrase_text: str, is_music: bool = False) -> str:
 
     # Default
     return "statement_stack"
+
 
 
 def build_kinetic_phrase_scenes(
@@ -818,24 +860,44 @@ def build_kinetic_phrase_scenes(
             is_music=is_music
         )
 
-        # 2. Causal Metaphor Asset Engine proposal (VectorIRAssembly):
-        asset_proposal = AssetEngine.propose(
-            phrase_text=cleaned_text,
-            palette=palette,
-            scene_idx=idx,
-            total_scenes=len(chunks),
-            creative_dna=creative_dna,
-            compiled_assemblies=compiled_assemblies
-        )
+        # Law 5: The Narration-Gated Graphic Gate
+        # Strictly BAN all abstract decorative vectors unless speech explicitly enumerates items
+        has_enumeration = is_explicit_enumeration(phrase_text)
 
-        # 3. Spatial Director Engine: Negotiate Canvas & Saliency Budget
-        spatial_alloc = SpatialDirectorEngine.allocate(
-            type_proposal=type_proposal.to_dict(),
-            asset_proposal=asset_proposal.to_dict() if asset_proposal else None,
-            scene_idx=idx,
-            total_scenes=len(chunks),
-            is_music=is_music
-        )
+        if has_enumeration and not is_music:
+            layout = "bento_grid"
+            # 2. Causal Metaphor Asset Engine proposal (VectorIRAssembly):
+            asset_proposal = AssetEngine.propose(
+                phrase_text=cleaned_text,
+                palette=palette,
+                scene_idx=idx,
+                total_scenes=len(chunks),
+                creative_dna=creative_dna,
+                compiled_assemblies=compiled_assemblies
+            )
+            # 3. Spatial Director Engine: Negotiate Canvas & Saliency Budget
+            spatial_alloc = SpatialDirectorEngine.allocate(
+                type_proposal=type_proposal.to_dict(),
+                asset_proposal=asset_proposal.to_dict() if asset_proposal else None,
+                scene_idx=idx,
+                total_scenes=len(chunks),
+                is_music=False
+            )
+        else:
+            # 100% pure centered kinetic typography (Zero random vectors)
+            layout = "kinetic_poster" if is_music else "statement_stack"
+            asset_proposal = None
+            spatial_alloc = SpatialAllocation(
+                hero_layer="typography",
+                archetype="pure_type_centered",
+                type_box=Rect(160, 160, 760, 760),
+                asset_box=Rect(0, 0, 0, 0),
+                env_box=Rect(0, 0, 1080, 1080),
+                type_opacity=1.0,
+                asset_opacity=0.0,
+                env_contrast=0.15
+            )
+
 
         # 4. Environment Engine: Procedural Atmosphere
         env_proposal = EnvironmentEngine.propose(
@@ -846,12 +908,6 @@ def build_kinetic_phrase_scenes(
             world=world
         )
 
-        # Derive layout from phrase meaning or music
-        layout = derive_phrase_layout(phrase_text, is_music=is_music)
-        if spatial_alloc.archetype == "asset_dominant" and not is_music:
-            layout = "bento_grid"
-        elif spatial_alloc.archetype == "split_contrast" and not is_music:
-            layout = "split_viewport"
 
         layer = LayerNode(
             id=f"l_{idx+1:02d}_hero",

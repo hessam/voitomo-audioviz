@@ -36,14 +36,16 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
 
   const containerStyle: React.CSSProperties = {
     position: "absolute",
-    left: box?.x !== undefined ? `${box.x}px` : "60px",
-    top: box?.y !== undefined ? `${box.y}px` : "140px",
-    width: box?.w !== undefined ? `${box.w}px` : "960px",
-    height: box?.h !== undefined ? `${box.h}px` : "800px",
+    top: "160px",
+    left: "160px",
+    right: "160px",
+    bottom: "160px",
     display: "flex",
     flexDirection: "column",
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
+    height: "calc(100% - 320px)",
+    width: "calc(100% - 320px)",
     textAlign: "center",
     direction: "rtl",
     zIndex: 10,
@@ -59,7 +61,8 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
         <TapeStrip
           text={spec.text}
           isBlack={false}
-          fontSize={spec.font_size || 84}
+          isEmphasis={true}
+          fontSize={84}
           fontFamily={fontFamily}
           tiltAngle={spec.tilt_angle || -1.5}
         />
@@ -78,11 +81,13 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
           "";
         if (!sText) return null;
         const sStart = s.frame_range?.[0] ?? 0;
+        const sEnd = s.frame_range?.[1] ?? (sStart + 45);
+        const sDuration = Math.max(1, sEnd - sStart);
 
-        // Dynamic 72px - 96px bold typography sizing
-        const baseSize =
-          stackedScenes.length > 2 ? 72 : stackedScenes.length === 2 ? 84 : 96;
-        const fontSize = sText.length > 24 ? baseSize - 12 : baseSize;
+        // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
+        const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
+        const isEmphasis = isCurrent || isHero;
+        const fontSize = isEmphasis ? 84 : 58;
         const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
         return (
@@ -90,11 +95,13 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
             key={s.id || idx}
             text={sText}
             isBlack={!isCurrent}
+            isEmphasis={isEmphasis}
             fontSize={fontSize}
             fontFamily={fontFamily}
             startFrame={sStart}
+            durationInFrames={sDuration}
             tiltAngle={tiltAngle}
-            style={{ margin: "10px 0" }}
+            style={{ margin: isEmphasis ? "12px 0" : "8px 0" }}
           />
         );
       })}

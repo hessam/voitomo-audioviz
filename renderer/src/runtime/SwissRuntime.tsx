@@ -288,15 +288,18 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
             spec={activeScene?.environment}
             defaultBg={ds.palette.bg}
           />
-          <AssetLayer
-            spec={activeScene?.asset}
-            vectorIR={activeScene?.vector_ir || activeScene?.asset?.vector_ir}
-            box={activeScene?.assetBox || activeScene?.spatial?.asset_box}
-            saliency={activeScene?.spatial}
-            startFrame={startFrame}
-            durationInFrames={sceneDuration}
-            palette={ds.palette}
-          />
+          {activeScene?.layout === "bento_grid" && activeScene?.asset && (
+            <AssetLayer
+              spec={activeScene?.asset}
+              vectorIR={activeScene?.vector_ir || activeScene?.asset?.vector_ir}
+              box={activeScene?.assetBox || activeScene?.spatial?.asset_box}
+              saliency={activeScene?.spatial}
+              startFrame={startFrame}
+              durationInFrames={sceneDuration}
+              palette={ds.palette}
+            />
+          )}
+
           <TypographyLayer
             spec={activeScene?.type || activeScene?.type_spec}
             box={activeScene?.typeBox || activeScene?.spatial?.type_box}
@@ -366,12 +369,17 @@ export const KineticPosterWorld: React.FC<{
     <div
       style={{
         position: "absolute",
-        inset: 0,
+        top: "160px",
+        left: "160px",
+        right: "160px",
+        bottom: "160px",
         display: "flex",
         flexDirection: "column",
-        justifyContent: "center",
         alignItems: "center",
-        padding: "40px 24px",
+        justifyContent: "center",
+        height: "calc(100% - 320px)",
+        width: "calc(100% - 320px)",
+        textAlign: "center",
         direction: "rtl",
         zIndex: 10,
       }}
@@ -384,23 +392,27 @@ export const KineticPosterWorld: React.FC<{
           "";
         if (!sText) return null;
         const sStart = s.frame_range[0];
+        const sEnd = s.frame_range[1] ?? (sStart + 45);
+        const sDuration = Math.max(1, sEnd - sStart);
 
-        // 78-106px bold hero typography commanding center canvas
-        const baseSize =
-          stackedScenes.length > 2 ? 78 : stackedScenes.length === 2 ? 90 : 106;
-        const fontSize = sText.length > 24 ? baseSize - 12 : baseSize;
+        // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
+        const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
+        const isEmphasis = isCurrent || isHero;
+        const fontSize = isEmphasis ? 84 : 58;
         const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
         return (
           <TapeStrip
-            key={s.id}
+            key={s.id || idx}
             text={sText}
             isBlack={!isCurrent}
+            isEmphasis={isEmphasis}
             fontSize={fontSize}
             fontFamily={fontFamily}
             startFrame={sStart}
+            durationInFrames={sDuration}
             tiltAngle={tiltAngle}
-            style={{ margin: "12px 0" }}
+            style={{ margin: isEmphasis ? "14px 0" : "10px 0" }}
           />
         );
       })}
@@ -411,7 +423,7 @@ export const KineticPosterWorld: React.FC<{
 /**
  * Visual World 2: Editorial (Education / Tutorial / LinkedIn)
  * Strict Bans: BANNED: 8-tile bento icon matrix, full-bleed poster scaling, frozen PowerPoint footers.
- * What is rendered: High-energy Persian typography commanding center 60% of screen + minimal subtitle HUD.
+ * What is rendered: High-energy Persian typography commanding center inside 160px safe padding.
  */
 export const EditorialWorld: React.FC<{
   scene?: any;
@@ -467,15 +479,20 @@ export const EditorialWorld: React.FC<{
         </div>
       </div>
 
-      {/* Spoken Persian phrases commanding the center vertical canvas (72px - 96px) */}
+      {/* Law 3: Absolute Dual-Axis Center Alignment (160px safe padding, 58/84px typography) */}
       <div
         style={{
           position: "absolute",
-          inset: "80px 48px 40px 48px",
+          top: "160px",
+          left: "160px",
+          right: "160px",
+          bottom: "160px",
           display: "flex",
           flexDirection: "column",
-          justifyContent: "center",
           alignItems: "center",
+          justifyContent: "center",
+          height: "calc(100% - 320px)",
+          width: "calc(100% - 320px)",
           textAlign: "center",
           direction: "rtl",
           zIndex: 10,
@@ -489,26 +506,32 @@ export const EditorialWorld: React.FC<{
             "";
           if (!sText) return null;
           const sStart = s.frame_range[0];
-          // 72px - 96px bold hero typography
-          const baseSize =
-            stackedScenes.length > 2 ? 72 : stackedScenes.length === 2 ? 84 : 96;
-          const fontSize = sText.length > 24 ? baseSize - 12 : baseSize;
+          const sEnd = s.frame_range[1] ?? (sStart + 45);
+          const sDuration = Math.max(1, sEnd - sStart);
+
+          // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
+          const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
+          const isEmphasis = isCurrent || isHero;
+          const fontSize = isEmphasis ? 84 : 58;
           const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
 
           return (
             <TapeStrip
-              key={s.id}
+              key={s.id || idx}
               text={sText}
               isBlack={!isCurrent}
+              isEmphasis={isEmphasis}
               fontSize={fontSize}
               fontFamily={fontFamily}
               startFrame={sStart}
+              durationInFrames={sDuration}
               tiltAngle={tiltAngle}
-              style={{ margin: "10px 0" }}
+              style={{ margin: isEmphasis ? "14px 0" : "10px 0" }}
             />
           );
         })}
       </div>
+
 
       {/* Minimal Subtitle HUD Progress Bar */}
       <div
@@ -579,114 +602,169 @@ export const PopBentoWorld: React.FC<{
         transition: "transform 0.05s linear",
       }}
     >
-      {/* Upper 46%: Punchy Headline & Kinetic Badge */}
-      <div
-        style={{
-          position: "absolute",
-          top: isBento ? "40px" : "18%",
-          left: "5%",
-          right: "5%",
-          height: isBento ? "46%" : "64%",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-          textAlign: "center",
-          direction: "rtl",
-          zIndex: 10,
-          transition: "all 0.15s ease",
-        }}
-      >
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "4px 16px",
-            backgroundColor: "#000000",
-            color: "#FFFFFF",
-            boxShadow: "4px 4px 0px 0px #000000",
-            fontSize: "15px",
-            fontWeight: 800,
-            fontFamily,
-            marginBottom: "8px",
-          }}
-        >
-          <span>✦</span>
-          <span>{currentBadge}</span>
-        </div>
-
-        {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
-          const sText =
-            s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
-            s.content?.find((c: any) => c.is_hero)?.text ||
-            s.content?.[0]?.text ||
-            "";
-          if (!sText) return null;
-          const sStart = s.frame_range[0];
-          // Scale font up: 72px - 92px without bento, 50px - 66px with bento
-          const baseSize = isBento
-            ? (stackedScenes.length > 2 ? 50 : stackedScenes.length === 2 ? 58 : 66)
-            : (stackedScenes.length > 2 ? 72 : stackedScenes.length === 2 ? 82 : 92);
-          const fontSize = sText.length > 25 ? baseSize - 10 : baseSize;
-          const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
-
-          return (
-            <TapeStrip
-              key={s.id}
-              text={sText}
-              isBlack={!isCurrent}
-              fontSize={fontSize}
-              fontFamily={fontFamily}
-              startFrame={sStart}
-              tiltAngle={tiltAngle}
-            />
-          );
-        })}
-      </div>
-
-      {/* Lower 50%: Dynamic Bento Matrix (Strictly ONLY if scene.layout === 'bento_grid') */}
-      {isBento && (
-        <div style={{ position: "absolute", inset: "52% 5% 6% 5%", zIndex: 5 }}>
-          {isFinalScene ? (
+      {/* When bento grid is gated (isBento is true only if explicit enumeration) */}
+      {isBento ? (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              top: "40px",
+              left: "80px",
+              right: "80px",
+              height: "42%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              direction: "rtl",
+              zIndex: 10,
+            }}
+          >
             <div
               style={{
-                width: "100%",
-                height: "100%",
-                backgroundColor: "#FFFFFF",
-                border: "3px solid #000000",
-                boxShadow: "10px 10px 0px 0px #000000",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "center",
+                display: "inline-flex",
                 alignItems: "center",
-                direction: "rtl",
-                gap: "12px",
-                padding: "20px",
+                gap: "8px",
+                padding: "4px 16px",
+                backgroundColor: "#000000",
+                color: "#FFFFFF",
+                boxShadow: "4px 4px 0px 0px #000000",
+                fontSize: "15px",
+                fontWeight: 800,
+                fontFamily,
+                marginBottom: "8px",
               }}
             >
-              <span
+              <span>✦</span>
+              <span>{currentBadge}</span>
+            </div>
+
+            {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
+              const sText =
+                s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+                s.content?.find((c: any) => c.is_hero)?.text ||
+                s.content?.[0]?.text ||
+                "";
+              if (!sText) return null;
+              const sStart = s.frame_range[0];
+              const sEnd = s.frame_range[1] ?? (sStart + 45);
+              const sDuration = Math.max(1, sEnd - sStart);
+              const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
+              const isEmphasis = isCurrent || isHero;
+              const fontSize = isEmphasis ? 84 : 58;
+              const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
+
+              return (
+                <TapeStrip
+                  key={s.id || idx}
+                  text={sText}
+                  isBlack={!isCurrent}
+                  isEmphasis={isEmphasis}
+                  fontSize={fontSize}
+                  fontFamily={fontFamily}
+                  startFrame={sStart}
+                  durationInFrames={sDuration}
+                  tiltAngle={tiltAngle}
+                />
+              );
+            })}
+          </div>
+
+          {/* Lower 50%: Dynamic Bento Matrix */}
+          <div style={{ position: "absolute", inset: "48% 80px 40px 80px", zIndex: 5 }}>
+            {isFinalScene ? (
+              <div
                 style={{
-                  backgroundColor: ds.palette.accent,
-                  color: "#000000",
-                  fontSize: "16px",
-                  fontWeight: 900,
-                  padding: "4px 14px",
-                  border: "2px solid #000000",
-                  boxShadow: "3px 3px 0px 0px #000000",
+                  width: "100%",
+                  height: "100%",
+                  backgroundColor: "#FFFFFF",
+                  border: "3px solid #000000",
+                  boxShadow: "10px 10px 0px 0px #000000",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  direction: "rtl",
+                  gap: "12px",
+                  padding: "20px",
                 }}
               >
-                ✦ اقدام فوری
-              </span>
-              <span style={{ fontSize: "34px", fontWeight: 900, color: "#000000" }}>
-                همین حالا ثبت سفارش کنید
-              </span>
-            </div>
-          ) : (
-            <BentoMatrix style={{ width: "100%", height: "100%" }} />
-          )}
+                <span
+                  style={{
+                    backgroundColor: ds.palette.accent,
+                    color: "#000000",
+                    fontSize: "16px",
+                    fontWeight: 900,
+                    padding: "4px 14px",
+                    border: "2px solid #000000",
+                    boxShadow: "3px 3px 0px 0px #000000",
+                  }}
+                >
+                  ✦ اقدام فوری
+                </span>
+                <span style={{ fontSize: "34px", fontWeight: 900, color: "#000000" }}>
+                  همین حالا ثبت سفارش کنید
+                </span>
+              </div>
+            ) : (
+              <BentoMatrix style={{ width: "100%", height: "100%" }} />
+            )}
+          </div>
+        </>
+      ) : (
+        /* Law 3: Absolute Dual-Axis Center Alignment (100% Pure Centered Kinetic Typography) */
+        <div
+          style={{
+            position: "absolute",
+            top: "160px",
+            left: "160px",
+            right: "160px",
+            bottom: "160px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            height: "calc(100% - 320px)",
+            width: "calc(100% - 320px)",
+            textAlign: "center",
+            direction: "rtl",
+            zIndex: 10,
+          }}
+        >
+          {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
+            const sText =
+              s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+              s.content?.find((c: any) => c.is_hero)?.text ||
+              s.content?.[0]?.text ||
+              "";
+            if (!sText) return null;
+            const sStart = s.frame_range[0];
+            const sEnd = s.frame_range[1] ?? (sStart + 45);
+            const sDuration = Math.max(1, sEnd - sStart);
+            const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
+            const isEmphasis = isCurrent || isHero;
+            const fontSize = isEmphasis ? 84 : 58;
+            const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
+
+            return (
+              <TapeStrip
+                key={s.id || idx}
+                text={sText}
+                isBlack={!isCurrent}
+                isEmphasis={isEmphasis}
+                fontSize={fontSize}
+                fontFamily={fontFamily}
+                startFrame={sStart}
+                durationInFrames={sDuration}
+                tiltAngle={tiltAngle}
+                style={{ margin: isEmphasis ? "14px 0" : "10px 0" }}
+              />
+            );
+          })}
         </div>
       )}
     </div>
   );
 };
+

@@ -9,10 +9,10 @@ import { renderMedia, selectComposition } from "@remotion/renderer";
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
-const PORT = 4000;
+const PORT = 4001;
 const PROFILES_DIR = "/root/workspace/video_profiles";
-const OUT_DIR = "/tmp/motion-renders";
-const AUDIO_DIR = "/tmp/motion-audio";
+const OUT_DIR = "/tmp/audioviz-renders";
+const AUDIO_DIR = "/tmp/audioviz-audio";
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
@@ -111,11 +111,12 @@ app.post("/render", async (req, res) => {
       codec: "h264",
       outputLocation: outPath,
       inputProps,
-      concurrency: 4,
+      concurrency: 2,
       chromiumOptions: {
         disableWebSecurity: true,
         ignoreCertificateErrors: true,
         headless: true,
+        gl: "angle",
       },
       timeoutInMilliseconds: 900000,
     });

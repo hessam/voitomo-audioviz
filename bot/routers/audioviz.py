@@ -12,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from bot.services.audio_features import AudioFeatureExtractor, compute_sha256
-from bot.services.transcriber import transcribe_audio
+from bot.services.transcriber import transcribe
 
 logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
@@ -70,7 +70,8 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
     await status_msg.edit_text("🔍 Extracting vocal lyrics via Whisper...")
     words = []
     try:
-        words = await transcribe_audio(local_path)
+        res = await asyncio.to_thread(transcribe, local_path)
+        words = res.get("words", [])
     except Exception as e:
         logger.info(f"Vocal transcription skipped or unavailable: {e}")
 

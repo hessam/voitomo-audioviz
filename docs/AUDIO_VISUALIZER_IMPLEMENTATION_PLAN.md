@@ -9,7 +9,7 @@ A 100% isolated music visualizer engine with synchronized kinetic lyrics, forked
 Transform Voitomo's proven kinetic typography pipeline into a dedicated **Stem-Aware Audio Visualizer Agent** that:
 1. Ingests songs/audio files via Telegram.
 2. Extracts acoustic intelligence (dry vocals, isolated kick/bass, BPM, downbeats, section drops) via `hermes-audio-engineer` (port 5001) and `hermes-music-dna` (port 5002).
-3. Renders audio-reactive visuals (Radial Vinyl, Swiss Oscilloscope, 3D Particle Tunnel) with synchronized snug, alternating black/white tape-strip lyrics.
+3. Renders high-end 3D audio-reactive WebGL visualizers (Particle Sphere, Quantum Iris, Neural Synapse, Monolith Field) with synchronized snug, alternating black/white tape-strip lyrics.
 4. Operates in 100% isolation from Voitomo and existing production services on Server 1 and Server 2.
 
 ---
@@ -90,23 +90,39 @@ Transform Voitomo's proven kinetic typography pipeline into a dedicated **Stem-A
   - Music-DNA beat grid $\rightarrow$ downbeat and drop frame markers.
 - Pass normalized numerical arrays directly into Remotion input props (zero client-side audio decoding latency).
 
-### Task 3: Remotion Visualizer Runtimes (`renderer/src/runtime/visualizers/`)
-1. **`RadialVinylVisualizer.tsx`**:
-   - Center circular album art / vinyl spinning with kick-reactive scale pulse.
-   - 64 radial spectrum bars driven by bass & mid frequencies.
-   - Snug Persian lyric tape strips centered below the hub.
-2. **`SwissOscilloscopeVisualizer.tsx`**:
-   - Clean vector Lissajous curves and real-time audio phase scopes.
-   - Minimalist Swiss grid tickers, BPM counter, and timestamp scrubbers.
-3. **`ReactiveParticleTunnel.tsx`**:
-   - High-energy 3D particle tunnel reacting to drop markers and bass booms.
-   - Giant 84px punchline tape strips slamming down at musical downbeats.
+### Task 3: 3D Audio-Reactive WebGL Runtimes (`renderer/src/runtime/visualizers/`)
+1. **`ParticleSphereVisualizer.tsx` (Particle Sphere)**:
+   - **Geometry**: `IcosahedronGeometry` or dense UV sphere with 15,000–30,000 point particles rendered as circular glowing dots.
+   - **Shaders**: 3D Simplex/Perlin noise vertex displacement along particle normals modulated by frequency bands; fragment shader with warm golden-yellow emissive gradient (`#FFD700` to `#FFA500`), additive blending, and soft glow falloff.
+   - **Audio Reactivity**: Low/bass frequencies drive scale pulsation and primary wave displacement; mids/highs drive surface ripple speed and micro-jitters; continuous slow dual-axis rotation.
+   - **Post-Processing**: `UnrealBloomPass` for soft vibrant ambient glow.
+
+2. **`QuantumIrisVisualizer.tsx` (Torus Knot / Quantum Iris)**:
+   - **Geometry**: Instanced ribbon/wireframe `TorusKnotGeometry` (~20,000 sub-segments).
+   - **Shaders**: Dynamic vertex displacement twisting geometry inside-out along its primary spline; neon cyan (`#00F0FF`) to deep violet (`#7B2CBF`) gradient.
+   - **Audio Reactivity**: Bass expands inner radius and triggers shockwave pulses; high frequencies modulate ribbon twist speed and spawn trailing particle sparks.
+   - **Post-Processing**: Additive blending, custom depth-fade, and chromatic aberration bloom.
+
+3. **`NeuralSynapseVisualizer.tsx` (Neural Synapse / Topological Web)**:
+   - **Geometry**: 1,500 interconnected floating nodes in a bounding sphere with dynamic distance-threshold line segments (Plexus effect).
+   - **Shaders/Points**: Glowing node points in pure white (`#FFFFFF`); connecting lines pulsing in emerald-teal (`#00FFA3`).
+   - **Audio Reactivity**: Audio transients fire electrical impulse waves traveling outward from the center across line branches; bass expands overall cluster volume.
+   - **Motion**: Gentle Brownian node motion with rotational orbit and heavy camera depth of field (bokeh).
+
+4. **`MonolithFieldVisualizer.tsx` (Monolith Field / Kinetic Wave Matrix)**:
+   - **Geometry**: $32 \times 32$ planar grid (1,024 instances) of `InstancedMesh` hexagonal prisms/cuboids floating over a dark void.
+   - **Shaders/Material**: High-roughness dark obsidian reflective sides with emissive neon acid-lime (`#D4FF00`) top caps.
+   - **Audio Reactivity**: Spatial center-outward FFT mapping; bass drives central height displacement, mids/highs generate cascading fluid ripple waves across the array.
+   - **Lighting/Effects**: Screen-space reflections, subtle floor fog, and an `UnrealBloomPass` targeting top emissive caps.
+
+- **Unified Lyric Engine**: All 4 visualizers integrate Voitomo's proven kinetic typography overlay with 3-line max FIFO clamping and 160px safe margin containment.
 
 ### Task 4: Telegram Bot UI & Router
 - **Interactive Preset Selector**:
-  - ✦ Radial Vinyl (Podcast / Track Preview)
-  - ⚡ Swiss Oscilloscope (Minimal / Lo-Fi)
-  - 🎬 Particle Tunnel (EDM / Trap / Beat)
+  - 🌟 Particle Sphere (Golden Glow / Ethereal)
+  - 🌀 Quantum Iris (Neon Cyan-Violet Torus Knot)
+  - ⚡ Neural Synapse (Emerald Web / Topological)
+  - 🏛️ Monolith Field (Acid-Lime Kinetic Wave Matrix)
 - **Lyric Toggle**: Option to render pure visualizer or visualizer + synchronized tape lyrics.
 
 ### Task 5: DevOps, Container & Watchdog

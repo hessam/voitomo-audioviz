@@ -75,6 +75,7 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
       {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
         const sText =
           s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
+          s.layers?.[0]?.text ||
           s.content?.find((c: any) => c.is_hero)?.text ||
           s.content?.[0]?.text ||
           s.type?.text ||

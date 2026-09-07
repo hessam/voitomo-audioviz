@@ -106,19 +106,82 @@ HARMONIC_PALETTES = [
 ]
 
 SAFE_PALETTES = {
+    "swiss_architectural": Palette(
+        bg="#F4F1EA",
+        fg="#111111",
+        accent="#002FA7",
+        muted="#71717A",
+        tape_bg="#111111",
+        tape_text="#F4F1EA",
+        shadow_block="#111111"
+    ),
+    "terracotta_obsidian": Palette(
+        bg="#18181A",
+        fg="#F5EBE6",
+        accent="#C84B31",
+        muted="#A1A1AA",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "cyber_emerald": Palette(
+        bg="#081C15",
+        fg="#FFFFFF",
+        accent="#00E599",
+        muted="#6EE7B7",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "tangerine_void": Palette(
+        bg="#0A192F",
+        fg="#FFFFFF",
+        accent="#FF5722",
+        muted="#94A3B8",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "forest_amber": Palette(
+        bg="#0E2319",
+        fg="#F4EFE6",
+        accent="#FF8C38",
+        muted="#A7F3D0",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "monochrome_ink": Palette(
+        bg="#111111",
+        fg="#FFFFFF",
+        accent="#FFE600",
+        muted="#A1A1AA",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
+    "velvet_plum": Palette(
+        bg="#1E0826",
+        fg="#FCE4EC",
+        accent="#FF2A6D",
+        muted="#F48FB1",
+        tape_bg="#FFFFFF",
+        tape_text="#000000",
+        shadow_block="#000000"
+    ),
     "studio_concrete": Palette(
         bg="#B8B9BA",
         fg="#000000",
-        accent="#000000",
+        accent="#0047FF",
         muted="#4B5563",
-        tape_bg="#FFFFFF",
-        tape_text="#000000",
+        tape_bg="#000000",
+        tape_text="#FFFFFF",
         shadow_block="#000000"
     ),
     "electric_cobalt": Palette(
         bg="#5537ED",
         fg="#FFFFFF",
-        accent="#FF5500",
+        accent="#D4FF00",
         muted="#E0E7FF",
         tape_bg="#FFFFFF",
         tape_text="#000000",
@@ -154,30 +217,30 @@ def is_banned_sludge_color(color: str) -> bool:
 def generate_harmonic_palette(seed_text: str, mood_verb: str = "") -> Palette:
     """
     Hardcoded Safe Palette Engine:
-    Selects exclusively among the 3 verified benchmark palettes:
-    1. Studio Concrete (#B8B9BA - Cavalry benchmark)
-    2. Electric Cobalt (#5537ED - Canva benchmark)
-    3. Signal Acid (#0E0F12 with #D4FF00)
-    Permanently bans any hex starting with #2 or #3.
+    Selects across 10 curated benchmark palettes with high contrast and zero brown sludge.
+    Uses semantic intent if present, and hash distribution across the 10 palettes for varied aesthetics.
     """
     import hashlib
     combined = f"{seed_text}_{mood_verb}".lower()
 
-    tech_keywords = ["لینکدین", "سیستم", "شرکت", "شغل", "کار", "پروژه", "رزومه", "مصاحبه", "تخصص", "فناوری", "رشد", "برند"]
-    if any(k in combined for k in tech_keywords):
-        return SAFE_PALETTES["electric_cobalt"]
+    if any(k in combined for k in ["سوئیس", "معماری", "تایپوگرافی", "آلاباستر", "کرم"]):
+        return SAFE_PALETTES["swiss_architectural"]
+    if any(k in combined for k in ["سفال", "خاک", "آجر", "صخره", "گرم"]):
+        return SAFE_PALETTES["terracotta_obsidian"]
+    if any(k in combined for k in ["جنگل", "طبیعت", "درخت", "سبز"]):
+        return SAFE_PALETTES["forest_amber"]
+    if any(k in combined for k in ["سایبر", "کد", "الگوریتم", "هکر", "ماتریکس"]):
+        return SAFE_PALETTES["cyber_emerald"]
+    if any(k in combined for k in ["شعله", "آتش", "انرژی", "انفجار"]):
+        return SAFE_PALETTES["tangerine_void"]
+    if any(k in combined for k in ["موزیک", "ترانه", "موسیقی", "احساس", "شعر"]):
+        return SAFE_PALETTES["velvet_plum"]
+    if any(k in combined for k in ["مینیمال", "ساده", "جوهر"]):
+        return SAFE_PALETTES["monochrome_ink"]
 
-    editorial_keywords = ["معماری", "طراحی", "سوئیس", "ساختار", "هنر", "تایپوگرافی", "ساده", "سفید", "خاکستری"]
-    if any(k in combined for k in editorial_keywords):
-        return SAFE_PALETTES["studio_concrete"]
-
-    night_keywords = ["شب", "سکوت", "موزیک", "ترانه", "آواز", "صدا", "سیگنال"]
-    if any(k in combined for k in night_keywords):
-        return SAFE_PALETTES["signal_acid"]
-
+    palette_keys = list(SAFE_PALETTES.keys())
     hash_int = int(hashlib.sha256(combined.encode("utf-8")).hexdigest(), 16)
-    choices = [SAFE_PALETTES["electric_cobalt"], SAFE_PALETTES["studio_concrete"], SAFE_PALETTES["signal_acid"]]
-    return choices[hash_int % len(choices)]
+    return SAFE_PALETTES[palette_keys[hash_int % len(palette_keys)]]
 
 @dataclass
 class CreativeDNA:

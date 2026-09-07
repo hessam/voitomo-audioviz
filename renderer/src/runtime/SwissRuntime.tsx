@@ -9,7 +9,7 @@ import { TapeStrip } from "./primitives/TapeStrip";
 import { BentoMatrix, GraphicTile } from "./primitives/BentoMatrix";
 import { EnvironmentLayer } from "./primitives/EnvironmentLayer";
 import { AssetLayer } from "./primitives/AssetLayer";
-import { TypographyLayer } from "./primitives/TypographyLayer";
+import { TypographyLayer, getFlattenedLadderLines } from "./primitives/TypographyLayer";
 
 export interface LayerNodeInput {
   id: string;
@@ -306,6 +306,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
             saliency={activeScene?.spatial}
             stackedScenes={stackedScenes}
             fontFamily={fontFamily}
+            palette={ds.palette}
           />
         </>
       ) : (
@@ -316,6 +317,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
               stackedScenes={stackedScenes}
               fontFamily={fontFamily}
               totalFrames={totalFrames}
+              palette={ds.palette}
             />
           )}
 
@@ -364,63 +366,14 @@ export const KineticPosterWorld: React.FC<{
   stackedScenes: Array<{ scene: any; isCurrent: boolean }>;
   fontFamily: string;
   totalFrames: number;
-}> = ({ stackedScenes, fontFamily }) => {
+  palette?: any;
+}> = ({ stackedScenes, fontFamily, palette }) => {
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: "160px",
-        left: "160px",
-        right: "160px",
-        bottom: "160px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "calc(100% - 320px)",
-        width: "calc(100% - 320px)",
-        textAlign: "center",
-        direction: "rtl",
-        zIndex: 10,
-      }}
-    >
-      {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
-        const sText =
-          s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
-          s.layers?.[0]?.text ||
-          s.content?.find((c: any) => c.is_hero)?.text ||
-          s.content?.[0]?.text ||
-          "";
-        if (!sText) return null;
-        const sStart = s.frame_range[0];
-        const currentEnd = scene?.frame_range?.[1];
-        const sEnd = currentEnd ?? s.frame_range[1] ?? (sStart + 45);
-        const sDuration = Math.max(1, sEnd - sStart);
-
-        // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
-        const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-        const isEmphasis = isCurrent && isHero;
-        // Task 2: Inverted Accent Tape Strips: Alternate white/black; punchlines get Black Tape!
-        const isBlack = isHero || idx % 2 === 1;
-        const fontSize = isHero ? 84 : 58;
-        const tiltAngle = idx % 2 === 0 ? -1.2 : 1.2;
-
-        return (
-          <TapeStrip
-            key={s.id || idx}
-            text={sText}
-            isBlack={isBlack}
-            isEmphasis={isHero}
-            fontSize={fontSize}
-            fontFamily={fontFamily}
-            startFrame={sStart}
-            durationInFrames={sDuration}
-            tiltAngle={tiltAngle}
-            style={{ margin: isHero ? "10px 0" : "6px 0" }}
-          />
-        );
-      })}
-    </div>
+    <TypographyLayer
+      stackedScenes={stackedScenes}
+      fontFamily={fontFamily}
+      palette={palette}
+    />
   );
 };
 
@@ -483,62 +436,12 @@ export const EditorialWorld: React.FC<{
         </div>
       </div>
 
-      {/* Law 3: Absolute Dual-Axis Center Alignment (160px safe padding, 58/84px typography) */}
-      <div
-        style={{
-          position: "absolute",
-          top: "160px",
-          left: "160px",
-          right: "160px",
-          bottom: "160px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "calc(100% - 320px)",
-          width: "calc(100% - 320px)",
-          textAlign: "center",
-          direction: "rtl",
-          zIndex: 10,
-        }}
-      >
-        {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
-          const sText =
-            s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
-            s.layers?.[0]?.text ||
-            s.content?.find((c: any) => c.is_hero)?.text ||
-            s.content?.[0]?.text ||
-            "";
-          if (!sText) return null;
-          const sStart = s.frame_range[0];
-          const currentEnd = scene?.frame_range?.[1];
-          const sEnd = currentEnd ?? s.frame_range[1] ?? (sStart + 45);
-          const sDuration = Math.max(1, sEnd - sStart);
-
-          // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px
-          const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-          const isEmphasis = isCurrent && isHero;
-          // Task 2: Inverted Accent Tape Strips: Alternate white/black; punchlines get Black Tape!
-          const isBlack = isHero || idx % 2 === 1;
-          const fontSize = isHero ? 84 : 58;
-          const tiltAngle = idx % 2 === 0 ? -1.2 : 1.2;
-
-          return (
-            <TapeStrip
-              key={s.id || idx}
-              text={sText}
-              isBlack={isBlack}
-              isEmphasis={isHero}
-              fontSize={fontSize}
-              fontFamily={fontFamily}
-              startFrame={sStart}
-              durationInFrames={sDuration}
-              tiltAngle={tiltAngle}
-              style={{ margin: isHero ? "10px 0" : "6px 0" }}
-            />
-          );
-        })}
-      </div>
+      {/* Law 3: Absolute Dual-Axis Center Alignment (160px safe padding, 3-line FIFO clamp) */}
+      <TypographyLayer
+        stackedScenes={stackedScenes}
+        fontFamily={fontFamily}
+        palette={ds.palette}
+      />
 
 
 
@@ -649,38 +552,23 @@ export const PopBentoWorld: React.FC<{
               <span>{currentBadge}</span>
             </div>
 
-            {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
-              const sText =
-                s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
-                s.layers?.[0]?.text ||
-                s.content?.find((c: any) => c.is_hero)?.text ||
-                s.content?.[0]?.text ||
-                "";
-              if (!sText) return null;
-              const sStart = s.frame_range[0];
-              const currentEnd = scene?.frame_range?.[1];
-              const sEnd = currentEnd ?? s.frame_range[1] ?? (sStart + 45);
-              const sDuration = Math.max(1, sEnd - sStart);
-              const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-              const isBlack = isHero || idx % 2 === 1;
-              const fontSize = isHero ? 84 : 58;
-              const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
-
-              return (
-                <TapeStrip
-                  key={s.id || idx}
-                  text={sText}
-                  isBlack={isBlack}
-                  isEmphasis={isHero}
-                  fontSize={fontSize}
-                  fontFamily={fontFamily}
-                  startFrame={sStart}
-                  durationInFrames={sDuration}
-                  tiltAngle={tiltAngle}
-                  style={{ margin: isHero ? "10px 0" : "6px 0" }}
-                />
-              );
-            })}
+            {getFlattenedLadderLines(stackedScenes, 2).map((item, idx) => (
+              <TapeStrip
+                key={item.id}
+                text={item.text}
+                isBlack={item.isHero || idx % 2 === 1}
+                isEmphasis={item.isHero}
+                fontSize={item.isHero ? 62 : 46}
+                fontFamily={fontFamily}
+                startFrame={item.startFrame}
+                durationInFrames={item.durationInFrames}
+                tiltAngle={item.tiltAngle}
+                tapeBg={ds.palette?.tape_bg}
+                tapeText={ds.palette?.tape_text}
+                singleLine={true}
+                style={{ margin: "4px 0" }}
+              />
+            ))}
           </div>
 
           {/* Lower 50%: Dynamic Bento Matrix */}
@@ -726,57 +614,11 @@ export const PopBentoWorld: React.FC<{
         </>
       ) : (
         /* Law 3: Absolute Dual-Axis Center Alignment (100% Pure Centered Kinetic Typography) */
-        <div
-          style={{
-            position: "absolute",
-            top: "160px",
-            left: "160px",
-            right: "160px",
-            bottom: "160px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            height: "calc(100% - 320px)",
-            width: "calc(100% - 320px)",
-            textAlign: "center",
-            direction: "rtl",
-            zIndex: 10,
-          }}
-        >
-          {stackedScenes.map(({ scene: s, isCurrent }, idx) => {
-            const sText =
-              s.layers?.find((l: any) => l.is_hero || l.weight === "900")?.text ||
-              s.layers?.[0]?.text ||
-              s.content?.find((c: any) => c.is_hero)?.text ||
-              s.content?.[0]?.text ||
-              "";
-            if (!sText) return null;
-            const sStart = s.frame_range[0];
-            const currentEnd = scene?.frame_range?.[1];
-            const sEnd = currentEnd ?? s.frame_range[1] ?? (sStart + 45);
-            const sDuration = Math.max(1, sEnd - sStart);
-            const isHero = s.layers?.some((l: any) => l.is_hero) || s.content?.some((c: any) => c.is_hero);
-            const isBlack = isHero || idx % 2 === 1;
-            const fontSize = isHero ? 84 : 58;
-            const tiltAngle = idx % 2 === 0 ? -1.5 : 1.5;
-
-            return (
-              <TapeStrip
-                key={s.id || idx}
-                text={sText}
-                isBlack={isBlack}
-                isEmphasis={isHero}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                startFrame={sStart}
-                durationInFrames={sDuration}
-                tiltAngle={tiltAngle}
-                style={{ margin: isHero ? "12px 0" : "8px 0" }}
-              />
-            );
-          })}
-        </div>
+        <TypographyLayer
+          stackedScenes={stackedScenes}
+          fontFamily={fontFamily}
+          palette={ds.palette}
+        />
       )}
     </div>
   );

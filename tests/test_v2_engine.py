@@ -256,6 +256,52 @@ class TestVoitomoV2Engine(unittest.TestCase):
         self.assertTrue(all(s.layout == "kinetic_poster" for s in music_scenes))
         self.assertFalse(any(s.layout == "bento_grid" for s in music_scenes))
 
+    def test_llm_palette_validation_and_sludge_rejection(self):
+        """Verify LLM palette validation, contrast checks, and sludge color rejection."""
+        from bot.services.director import parse_and_validate_llm_palette
+
+        # 1. Valid high-contrast palette is accepted
+        valid_raw = {
+            "bg": "#18181A",
+            "fg": "#F5EBE6",
+            "accent": "#C84B31",
+            "muted": "#A1A1AA"
+        }
+        pal = parse_and_validate_llm_palette(valid_raw, "متن تستی", "موضوع")
+        self.assertEqual(pal.bg, "#18181A")
+        self.assertEqual(pal.fg, "#F5EBE6")
+        self.assertEqual(pal.tape_bg, "#FFFFFF")
+
+        # 2. Banned brown sludge is rejected and replaced
+        sludge_raw = {
+            "bg": "#211513",
+            "fg": "#FFFFFF",
+            "accent": "#FF5500",
+            "muted": "#CCCCCC"
+        }
+        safe_pal = parse_and_validate_llm_palette(sludge_raw, "متن تستی", "موضوع")
+        self.assertFalse(safe_pal.bg.startswith("#2"), "Banned sludge color #211513 must be rejected!")
+
+        # 3. Banned navy is rejected
+        navy_raw = {
+            "bg": "#090A0F",
+            "fg": "#FFFFFF",
+            "accent": "#00FF00",
+            "muted": "#AAAAAA"
+        }
+        navy_pal = parse_and_validate_llm_palette(navy_raw, "متن تستی", "موضوع")
+        self.assertNotEqual(navy_pal.bg, "#090A0F")
+
+        # 4. Low contrast is rejected
+        low_contrast_raw = {
+            "bg": "#111111",
+            "fg": "#222222",
+            "accent": "#333333",
+            "muted": "#444444"
+        }
+        contrast_pal = parse_and_validate_llm_palette(low_contrast_raw, "متن تستی", "موضوع")
+        self.assertNotEqual(contrast_pal.fg, "#222222")
+
 if __name__ == "__main__":
     unittest.main()
 

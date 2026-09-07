@@ -209,7 +209,7 @@ export const SwissRuntime: React.FC<SwissRuntimeProps> = ({ creativeSpec, audioS
     grid: { alignment: "center", margin: 80, columns: 12 },
   };
 
-  const fontFamily = creativeSpec?.creative_dna?.font_family || ds.type_scale.family || "Dana, Vazirmatn, sans-serif";
+  const fontFamily = creativeSpec?.creative_dna?.font_family || ds.type_scale?.family || "Dana, Vazirmatn, sans-serif";
   const scenes = creativeSpec?.timeline?.scenes ?? [];
   const totalFrames = creativeSpec?.meta?.total_frames || 300;
   const margin = ds.grid?.margin || 80;

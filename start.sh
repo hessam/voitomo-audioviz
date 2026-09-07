@@ -4,24 +4,26 @@ set -e
 export NVM_DIR="/root/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-export TELEGRAM_BOT_TOKEN=""
-export TELEGRAM_ALLOWED_USERS="92241363"
+export AUDIOVIZ_BOT_TOKEN=""
+export TELEGRAM_ALLOWED_USERS="92241363,6027086169"
+export RENDERER_URL="http://127.0.0.1:4001"
+export VAULT_STORAGE_PATH="/opt/hermes-vault/viz"
 
-cd /root/workspace
+cd /root/audioviz
 
-echo "🚀 Starting render server..."
-cd /root/workspace/renderer
-node -r ts-node/register server.ts >> /tmp/renderer.log 2>&1 &
+echo "🚀 Starting Audioviz 3D WebGL render server on port 4001..."
+cd /root/audioviz/renderer
+nohup node -r ts-node/register server.ts >> /tmp/audioviz_renderer.log 2>&1 &
 RENDERER_PID=$!
 echo "Renderer PID: $RENDERER_PID"
 
 sleep 5
 
-echo "🤖 Starting Telegram bot..."
-cd /root/workspace
-.venv/bin/python3 bot/main.py >> /tmp/bot.log 2>&1 &
+echo "🤖 Starting Audioviz Telegram bot (@audiovizbot)..."
+cd /root/audioviz
+nohup /root/workspace/.venv/bin/python3 audioviz_bot_run.py >> /tmp/audioviz_bot.log 2>&1 &
 BOT_PID=$!
 echo "Bot PID: $BOT_PID"
 
-echo "✅ Both services started"
+echo "✅ Both Audioviz services running"
 wait $BOT_PID

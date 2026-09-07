@@ -36,7 +36,7 @@ def acquire_single_instance_lock():
 
 from bot.routers import audioviz
 
-BOT_TOKEN = os.environ.get("AUDIOVIZ_BOT_TOKEN", os.environ.get("TELEGRAM_BOT_TOKEN", ""))
+BOT_TOKEN = os.environ.get("AUDIOVIZ_BOT_TOKEN", "")
 ALLOWED_USERS = set(int(x) for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "92241363,6027086169").split(","))
 
 

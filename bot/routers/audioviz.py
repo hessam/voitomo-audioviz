@@ -146,8 +146,28 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             shutil.copyfile(rendered_mp4, vault_dest)
             logger.info(f"📦 Successfully mirrored render to vault: {vault_dest}")
 
-        # 4. Deliver video to Telegram user
-        video_file = FSInputFile(rendered_mp4)
+        # 4. Guarantee file is under Telegram's 50MB bot upload limit (<= 48MB)
+        file_size = os.path.getsize(rendered_mp4)
+        send_path = rendered_mp4
+        if file_size > 48 * 1024 * 1024:
+            logger.warning(f"⚠️ Video size ({file_size / (1024*1024):.2f}MB) exceeds Telegram 48MB limit. Compressing with ffmpeg...")
+            compressed_path = rendered_mp4.replace(".mp4", "_tg_compat.mp4")
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", rendered_mp4,
+                "-c:v", "libx264", "-b:v", "5000k", "-maxrate", "6000k", "-bufsize", "10000k",
+                "-c:a", "aac", "-b:a", "192k",
+                "-preset", "fast", "-movflags", "+faststart",
+                compressed_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            if os.path.exists(compressed_path) and os.path.getsize(compressed_path) > 0:
+                send_path = compressed_path
+                logger.info(f"✅ Video compressed to {os.path.getsize(send_path) / (1024*1024):.2f}MB")
+
+        # 5. Deliver video to Telegram user
+        video_file = FSInputFile(send_path)
         if callback.message:
             await callback.message.delete()
             await callback.message.answer_video(

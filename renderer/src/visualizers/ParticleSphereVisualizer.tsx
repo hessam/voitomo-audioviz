@@ -69,39 +69,48 @@ float snoise(vec3 v) {
 }
 `;
 
-// Vertex shader with organic corrugated wave folds maintaining spherical boundary
+// Vertex shader with audio-reactive corrugated wave folds & micro-jitters
 const particleVertexShader = `
 uniform float uTime;
 uniform float uBass;
 uniform float uMids;
 uniform float uTreble;
+uniform float uTransient;
+uniform float uBeat;
 varying float vFresnel;
 varying float vDisp;
 varying float vFacing;
 varying float vRidge;
 varying vec3 vNormal;
+varying float vTreble;
+varying float vTransient;
 
 ${simplexNoiseGLSL}
 
 void main() {
-  vec3 n = normalize(position);
+  vTreble = uTreble;
+  vTransient = uTransient;
 
+  vec3 n = normalize(position);
   vec3 p = position * 0.90;
-  
-  // 1. Broad rolling organic folds
-  float n1 = snoise(p * 0.85 + vec3(uTime * 0.16, uTime * 0.08, 0.0));
-  float n2 = snoise(p * 1.70 - vec3(0.0, uTime * 0.22, uTime * 0.10));
-  
-  // 2. Corrugated ripple ridges matching reference fingerprint texture
+
+  // 1. Broad rolling organic folds (speed modulated by mids/vocals)
+  float n1 = snoise(p * 0.85 + vec3(uTime * 0.16 + uMids * 0.20, uTime * 0.08, 0.0));
+  float n2 = snoise(p * 1.70 - vec3(0.0, uTime * 0.22 + uMids * 0.30, uTime * 0.10));
+
+  // 2. Corrugated ripple ridges dynamically driven by mids and vocal energy
   float ridgeNoise = snoise(p * 1.50 + vec3(uTime * 0.12));
-  float ridges = sin(position.y * 12.0 + ridgeNoise * 3.4 + uTime * 0.28) * 0.18;
+  float ridges = sin(position.y * 12.0 + ridgeNoise * 3.4 + uTime * 0.28 + uMids * 1.6) * (0.18 + uMids * 0.12);
   vRidge = ridges;
 
-  // Calibrated displacement keeps overall spherical form round and cohesive
-  float disp = (n1 * 0.36 + n2 * 0.18 + ridges * 0.46) * (0.48 + uBass * 0.35);
+  // 3. High-frequency micro-jitter driven by treble / hi-hats
+  vec3 trebleJitter = n * (snoise(position * 8.0 + vec3(uTime * 3.0)) * uTreble * 0.045);
+
+  // Calibrated displacement with bass swell, rhythmic beat impulse, and transient shockwave
+  float disp = (n1 * 0.36 + n2 * 0.18 + ridges * 0.46) * (0.48 + uBass * 0.40 + uBeat * 0.20) + uTransient * 0.22;
   vDisp = disp;
 
-  vec3 displacedPosition = position + n * disp;
+  vec3 displacedPosition = position + n * disp + trebleJitter;
   vec4 mvPosition = modelViewMatrix * vec4(displacedPosition, 1.0);
 
   // View-space normal for rim halo and frontal lighting
@@ -113,21 +122,25 @@ void main() {
   // Soft front-facing factor: allows smooth wrap without back-hemisphere blowout
   vFacing = smoothstep(-0.35, 0.20, dot(viewNormal, viewDir));
 
-  // Fine pinpoint dot sizing
-  float pSize = (2.3 + uBass * 0.8) * (260.0 / -mvPosition.z);
-  gl_PointSize = clamp(pSize, 1.5, 5.0);
+  // Fine pinpoint dot sizing with transient burst
+  float pSize = (2.3 + uBass * 0.8 + uTransient * 1.2) * (260.0 / -mvPosition.z);
+  gl_PointSize = clamp(pSize, 1.5, 6.0);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
-// Fragment shader: Radiant golden-amber palette matching reference image 1:1
+// Fragment shader: Radiant golden-amber palette with treble shimmer & transient flash
 const particleFragmentShader = `
 varying float vFresnel;
 varying float vDisp;
 varying float vFacing;
 varying float vRidge;
 varying vec3 vNormal;
+varying float vTreble;
+varying float vTransient;
 uniform float uBass;
+uniform float uMids;
+uniform float uBeat;
 
 void main() {
   if (vFacing < 0.02) discard;
@@ -138,8 +151,7 @@ void main() {
 
   float alphaMask = smoothstep(0.5, 0.16, dist);
 
-  // 1:1 Reference Golden Color Ramp:
-  // Pure vibrant golden spectrum - low blue ensures pure blazing yellow-gold, never cold white
+  // 1:1 Reference Golden Color Ramp
   vec3 deepAmber = vec3(0.96, 0.42, 0.01);
   vec3 richGold = vec3(1.0, 0.78, 0.03);
   vec3 crestYellow = vec3(1.0, 0.92, 0.14);
@@ -148,12 +160,12 @@ void main() {
 
   float dispFactor = clamp(vDisp * 2.2 + 0.50, 0.0, 1.0);
   vec3 col = mix(deepAmber, richGold, dispFactor);
-  
-  // Highlight the corrugated ridges across the front surface
+
+  // Highlight the corrugated ridges
   float ridgeFactor = smoothstep(-0.05, 0.12, vRidge);
   col = mix(col, crestYellow, ridgeFactor * 0.85);
 
-  // Front lighting to illuminate the center ridges
+  // Front lighting illuminates the center ridges
   vec3 lightDir = normalize(vec3(0.0, 0.2, 1.0));
   float frontLight = max(dot(vNormal, lightDir), 0.0);
   col += richGold * pow(frontLight, 1.4) * 0.45;
@@ -167,13 +179,20 @@ void main() {
   col = mix(col, rimGold, rim * 0.88);
   col += hotGold * pow(vFresnel, 3.8) * 1.30;
 
+  // High-frequency treble sparkle on individual dots
+  float sparkle = sin(coord.x * 24.0 + coord.y * 24.0 + vTreble * 10.0) * vTreble;
+  col += vec3(0.20, 0.18, 0.04) * max(0.0, sparkle);
+
+  // Instantaneous incandescent flash on beat drop / drum transient
+  col += hotGold * (vTransient * 0.65 + uBeat * 0.28);
+
   // Alpha curve preserves dot definition while making the whole orb luminous
   float alpha = alphaMask * vFacing * mix(0.85, 1.0, rim);
   gl_FragColor = vec4(col * (1.15 + uBass * 0.25), alpha);
 }
 `;
 
-// Industrial concrete studio floor shader
+// Industrial concrete studio floor shader with audio-reactive specular pool
 const floorVertexShader = `
 varying vec3 vWorldPos;
 varying vec2 vUv;
@@ -188,34 +207,34 @@ void main() {
 const floorFragmentShader = `
 uniform vec3 uOrbPos;
 uniform float uBass;
+uniform float uBeat;
+uniform float uTransient;
 varying vec3 vWorldPos;
 varying vec2 vUv;
 
 ${simplexNoiseGLSL}
 
 void main() {
-  // Industrial dark polished concrete floor tone
   vec3 floorBase = vec3(0.010, 0.013, 0.018);
 
-  // Stretched golden specular puddle reflection directly under the orb
   float dx = vWorldPos.x - uOrbPos.x;
   float dz = vWorldPos.z - uOrbPos.z;
-  
-  float reflShape = exp(-(dx * dx / 3.0 + dz * dz / 14.0));
-  
-  // Concrete surface micro-grain & wet streaks
+
+  // Floor reflection stretches and expands with bass & beat downbeats
+  float spreadX = 2.8 + uBass * 0.6 + uTransient * 1.0;
+  float reflShape = exp(-(dx * dx / spreadX + dz * dz / 15.0));
+
   float floorGrain = snoise(vec3(vWorldPos.x * 2.2, vWorldPos.z * 5.5, 0.0)) * 0.15;
   float totalRefl = clamp(reflShape * (0.95 + floorGrain), 0.0, 1.0);
 
-  vec3 goldReflection = vec3(1.0, 0.72, 0.10) * (1.35 + uBass * 0.40);
+  vec3 goldReflection = vec3(1.0, 0.72, 0.10) * (1.35 + uBass * 0.45 + uBeat * 0.35 + uTransient * 0.70);
   vec3 finalColor = floorBase + goldReflection * totalRefl;
 
-  // Subtle overhead spotlight specular streaks
+  // Ambient spotlight reflections on wet floor
   float spot1 = exp(-(pow(vWorldPos.x + 3.8, 2.0) / 0.8 + pow(vWorldPos.z + 1.8, 2.0) / 6.0)) * 0.06;
   float spot2 = exp(-(pow(vWorldPos.x - 3.8, 2.0) / 0.8 + pow(vWorldPos.z + 1.8, 2.0) / 6.0)) * 0.06;
   finalColor += vec3(0.7, 0.85, 1.0) * (spot1 + spot2);
 
-  // Vignette
   float vignette = smoothstep(26.0, 4.0, length(vWorldPos.xz));
   gl_FragColor = vec4(finalColor * vignette, 1.0);
 }
@@ -322,6 +341,8 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
         uBass: { value: 0.0 },
         uMids: { value: 0.0 },
         uTreble: { value: 0.0 },
+        uTransient: { value: 0.0 },
+        uBeat: { value: 0.0 },
       },
       transparent: true,
       blending: THREE.AdditiveBlending,
@@ -332,7 +353,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     orbPoints.position.set(0, 0.35, 0);
     scene.add(orbPoints);
 
-    // Lateral floating sparks / embers (concentrated in horizontal fans on left and right)
+    // Lateral floating sparks / embers (fan spray on both sides)
     const sparkCount = 900;
     const sparkGeo = new THREE.BufferGeometry();
     const sparkPos = new Float32Array(sparkCount * 3);
@@ -346,7 +367,6 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     for (let i = 0; i < sparkCount; i++) {
       const side = rand() > 0.5 ? 1 : -1;
       const r = Math.pow(rand(), 1.2);
-      // Concentrated lateral spray on left and right flanks
       const x = side * (2.1 + r * 5.2);
       const y = (rand() - 0.44) * 2.6 + 0.35 + (1.0 - r) * 0.35;
       const z = (rand() - 0.5) * 2.2;
@@ -360,25 +380,50 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     const sparkMaterial = new THREE.ShaderMaterial({
       vertexShader: `
         uniform float uTime;
+        uniform float uBass;
+        uniform float uTreble;
+        uniform float uTransient;
+        uniform float uBeat;
+        varying float vTwinkle;
+
         void main() {
           vec3 p = position;
-          p.y += sin(uTime * 0.4 + position.x * 1.5) * 0.10;
-          p.x += cos(uTime * 0.3 + position.y * 1.5) * 0.08;
+          float side = sign(position.x);
+
+          // Audio-reactive lateral expansion on beat drops and bass swells
+          p.x += side * (uBass * 0.40 + uTransient * 1.15 + uBeat * 0.50);
+          p.y += sin(uTime * 0.5 + position.x * 1.5) * 0.12 + (uTransient * 0.35);
+          p.z += cos(uTime * 0.4 + position.y * 1.5) * 0.10;
+
+          vTwinkle = sin(uTime * 14.0 + position.x * 6.0) * uTreble;
+
           vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
-          gl_PointSize = clamp(2.4 * (280.0 / -mvPosition.z), 1.0, 5.0);
+          float pSize = (2.4 + uTransient * 2.2 + uBass * 1.0) * (280.0 / -mvPosition.z);
+          gl_PointSize = clamp(pSize, 1.2, 7.5);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
       fragmentShader: `
+        varying float vTwinkle;
+        uniform float uTransient;
         void main() {
           vec2 coord = gl_PointCoord - vec2(0.5);
           float dist = length(coord);
           if (dist > 0.5) discard;
-          float alpha = smoothstep(0.5, 0.12, dist) * 0.90;
-          gl_FragColor = vec4(vec3(1.0, 0.82, 0.15), alpha);
+
+          float twinkle = 0.85 + 0.30 * vTwinkle;
+          float alpha = smoothstep(0.5, 0.12, dist) * 0.90 * twinkle;
+          vec3 sparkCol = mix(vec3(1.0, 0.82, 0.15), vec3(1.0, 0.98, 0.70), uTransient);
+          gl_FragColor = vec4(sparkCol * (1.0 + uTransient * 1.5), alpha);
         }
       `,
-      uniforms: { uTime: { value: 0.0 } },
+      uniforms: {
+        uTime: { value: 0.0 },
+        uBass: { value: 0.0 },
+        uTreble: { value: 0.0 },
+        uTransient: { value: 0.0 },
+        uBeat: { value: 0.0 },
+      },
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -395,6 +440,8 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
       uniforms: {
         uOrbPos: { value: new THREE.Vector3(0, 0.35, 0) },
         uBass: { value: 0.0 },
+        uBeat: { value: 0.0 },
+        uTransient: { value: 0.0 },
       },
       depthWrite: true,
     });
@@ -429,7 +476,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     rightTruss.rotation.z = 0.05;
     scene.add(rightTruss);
 
-    // Studio Spotlights (spaced to left and right wings matching reference image)
+    // Studio Spotlights
     const spotCoords = [
       [-5.8, 4.0, -4.2],
       [-4.0, 3.9, -4.0],
@@ -490,8 +537,40 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
   // Deterministic frame update
   const timeSeconds = frame / fps;
   const bass = (features?.bass?.[frame] ?? 0.0) * intensity;
-  const mids = (features?.mids?.[frame] ?? 0.0) * intensity;
+  const rawMids = features?.mids?.[frame] ?? 0.0;
+  const vocal = features?.vocalEnergy?.[frame] ?? 0.0;
+  const mids = (rawMids * 0.6 + vocal * 0.4) * intensity;
   const treble = (features?.treble?.[frame] ?? 0.0) * intensity;
+
+  // Calculate exponential decaying beat impulse
+  let beatImpulse = 0.0;
+  if (features?.beatFrames && features.beatFrames.length > 0) {
+    for (let i = features.beatFrames.length - 1; i >= 0; i--) {
+      const bf = features.beatFrames[i];
+      if (bf <= frame) {
+        const diff = frame - bf;
+        if (diff < 8) {
+          beatImpulse = Math.exp(-diff * 0.48);
+        }
+        break;
+      }
+    }
+  }
+
+  // Calculate exponential decaying transient shockwave
+  let transientImpulse = 0.0;
+  if (features?.transients && features.transients.length > 0) {
+    for (let i = features.transients.length - 1; i >= 0; i--) {
+      const tf = features.transients[i];
+      if (tf <= frame) {
+        const diff = frame - tf;
+        if (diff < 10) {
+          transientImpulse = Math.exp(-diff * 0.38);
+        }
+        break;
+      }
+    }
+  }
 
   if (threeRef.current) {
     const { renderer, scene, camera, orbPoints, orbMaterial, sparkMaterial, floorMaterial } =
@@ -501,17 +580,30 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     orbMaterial.uniforms.uBass.value = bass;
     orbMaterial.uniforms.uMids.value = mids;
     orbMaterial.uniforms.uTreble.value = treble;
+    orbMaterial.uniforms.uTransient.value = transientImpulse;
+    orbMaterial.uniforms.uBeat.value = beatImpulse;
 
     sparkMaterial.uniforms.uTime.value = timeSeconds;
+    sparkMaterial.uniforms.uBass.value = bass;
+    sparkMaterial.uniforms.uTreble.value = treble;
+    sparkMaterial.uniforms.uTransient.value = transientImpulse;
+    sparkMaterial.uniforms.uBeat.value = beatImpulse;
+
     floorMaterial.uniforms.uBass.value = bass;
+    floorMaterial.uniforms.uBeat.value = beatImpulse;
+    floorMaterial.uniforms.uTransient.value = transientImpulse;
 
     // Slow organic Y-axis rotation
     orbPoints.rotation.y = timeSeconds * 0.15;
     orbPoints.rotation.x = Math.sin(timeSeconds * 0.08) * 0.05;
 
-    // Bass-driven pulsation
-    const scale = 1.0 + bass * 0.10;
+    // Bass & Beat-driven scale pulsation
+    const scale = 1.0 + (bass * 0.12 + beatImpulse * 0.08 + transientImpulse * 0.14);
     orbPoints.scale.set(scale, scale, scale);
+
+    // Dynamic Camera breathing with rhythm
+    const cameraPunch = beatImpulse * 0.15 + transientImpulse * 0.28;
+    camera.position.z = 9.4 - cameraPunch;
 
     renderer.render(scene, camera);
   }

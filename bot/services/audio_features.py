@@ -53,6 +53,7 @@ def extract_multiband_features_ffmpeg(
     audio_path: str,
     fps: int = 30,
     total_frames: int = 300,
+    vocal_path: Optional[str] = None,
 ) -> AudioMultibandFeatures:
     """
     Extracts deterministic 30 FPS normalized [0.0, 1.0] multiband frequency features:
@@ -60,18 +61,15 @@ def extract_multiband_features_ffmpeg(
     - Mids: 250Hz - 4000Hz (vocals, melodies, snare punch)
     - Treble: 4000Hz - 16000Hz (hi-hats, cymbals, air)
     - Transients: frame indices with sharp onset peaks
+    - Vocal Energy: isolated vocal envelope [0.0, 1.0]
+    - Macro Energy: overall track dynamic range [0.0, 1.0]
+    - Rhythm Grid: BPM, beat frames, and downbeat frames
     """
-    bass_curve = [0.0] * total_frames
-    mids_curve = [0.0] * total_frames
-    treble_curve = [0.0] * total_frames
-    transients: List[int] = []
-
-    def get_band_rms(filter_str: str) -> List[float]:
+    def get_band_rms(target_path: str, filter_str: str) -> List[float]:
         try:
-            # Output raw 16-bit mono PCM at 3000 Hz (100 samples per video frame at 30 FPS)
             target_sr = fps * 100
             cmd = [
-                "ffmpeg", "-y", "-i", audio_path,
+                "ffmpeg", "-y", "-i", target_path,
                 "-af", filter_str,
                 "-ar", str(target_sr),
                 "-ac", "1",
@@ -104,7 +102,6 @@ def extract_multiband_features_ffmpeg(
                 rms = math.sqrt(sum_sq / len(chunk))
                 frame_energies.append(rms)
 
-            # Normalize 0.0 - 1.0
             max_val = max(frame_energies) if frame_energies else 1.0
             if max_val > 0.001:
                 return [round(min(1.0, e / max_val), 4) for e in frame_energies]
@@ -114,11 +111,19 @@ def extract_multiband_features_ffmpeg(
             return [0.0] * total_frames
 
     # Extract 3 frequency bands
-    bass_raw = get_band_rms("lowpass=f=250,acompressor=threshold=-18dB:ratio=3")
-    mids_raw = get_band_rms("highpass=f=250,lowpass=f=4000")
-    treble_raw = get_band_rms("highpass=f=4000,lowpass=f=16000")
+    bass_raw = get_band_rms(audio_path, "lowpass=f=250,acompressor=threshold=-18dB:ratio=3")
+    mids_raw = get_band_rms(audio_path, "highpass=f=250,lowpass=f=4000")
+    treble_raw = get_band_rms(audio_path, "highpass=f=4000,lowpass=f=16000")
 
-    # Apply exponential smoothing to prevent single-frame flickering
+    # Macro overall track energy
+    macro_raw = get_band_rms(audio_path, "volume=1.0")
+
+    # Isolated vocal energy curve
+    vocal_target = vocal_path if (vocal_path and os.path.exists(vocal_path)) else audio_path
+    vocal_filter = "volume=1.0" if (vocal_path and os.path.exists(vocal_path)) else "highpass=f=200,lowpass=f=3500"
+    vocal_raw = get_band_rms(vocal_target, vocal_filter)
+
+    # Apply exponential smoothing
     def smooth(arr: List[float], alpha: float = 0.35) -> List[float]:
         if not arr:
             return arr
@@ -130,17 +135,32 @@ def extract_multiband_features_ffmpeg(
     bass_curve = smooth(bass_raw, alpha=0.45)
     mids_curve = smooth(mids_raw, alpha=0.35)
     treble_curve = smooth(treble_raw, alpha=0.30)
+    vocal_curve = smooth(vocal_raw, alpha=0.40)
+    macro_curve = smooth(macro_raw, alpha=0.25)
 
-    # Detect transient drops/kicks (peaks in bass where instantaneous energy > 1.4x smoothed)
+    # Detect transient drops/kicks
+    transients: List[int] = []
     for i in range(1, len(bass_raw) - 1):
-        if bass_raw[i] > 0.55 and bass_raw[i] > bass_raw[i - 1] and bass_raw[i] >= bass_raw[i + 1]:
+        if bass_raw[i] > 0.50 and bass_raw[i] > bass_raw[i - 1] and bass_raw[i] >= bass_raw[i + 1]:
             transients.append(i)
+
+    # Extract rhythm and beat grid via AudioIntelligenceAdapter
+    rhythm = AudioIntelligenceAdapter.extract_rhythm_and_beats(audio_path, fps=fps)
+    bpm = rhythm.get("bpm", 120.0)
+    beat_frames = [f for f in rhythm.get("beat_frames", []) if f < total_frames]
+    downbeat_frames = [f for f in rhythm.get("downbeat_frames", []) if f < total_frames]
 
     return AudioMultibandFeatures(
         bass=bass_curve,
         mids=mids_curve,
         treble=treble_curve,
         transients=transients,
+        bpm=bpm,
+        beatFrames=beat_frames,
+        downbeatFrames=downbeat_frames,
+        vocalEnergy=vocal_curve,
+        macroEnergy=macro_curve,
+        musicalKey="C Major",
     )
 
 
@@ -179,11 +199,12 @@ class AudioFeatureExtractor:
         except Exception as e:
             logger.info(f"Vocal stem separation skipped: {e}")
 
-        # 2. Extract deterministic multiband 30 FPS features
+        # 2. Extract deterministic multiband 30 FPS features with stem & rhythm awareness
         features = extract_multiband_features_ffmpeg(
             audio_path=audio_path,
             fps=fps,
             total_frames=total_frames,
+            vocal_path=vocal_stem_path,
         )
 
         # 3. Format Whisper words into 30 FPS clamped LyricLines

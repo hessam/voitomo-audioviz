@@ -16,6 +16,18 @@ export interface AudioMultibandFeatures {
   treble: number[];
   /** Frame indices where transient drum kicks or drops occur */
   transients: number[];
+  /** Detected musical tempo in BPM */
+  bpm?: number;
+  /** Exact frame indices of quarter-note beats */
+  beatFrames?: number[];
+  /** 1st-beat-of-bar downbeats */
+  downbeatFrames?: number[];
+  /** 30 FPS isolated vocal envelope */
+  vocalEnergy?: number[];
+  /** 30 FPS structural build-up/drop curve */
+  macroEnergy?: number[];
+  /** Harmonic key tonality (e.g. "D Minor") */
+  musicalKey?: string;
 }
 
 export interface LyricLine {

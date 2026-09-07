@@ -14,6 +14,12 @@ class AudioMultibandFeatures:
     mids: List[float]  # 30 FPS normalized [0.0, 1.0]
     treble: List[float]  # 30 FPS normalized [0.0, 1.0]
     transients: List[int]  # Frame indices where transient drum kicks or drops occur
+    bpm: float = 120.0  # Detected musical tempo
+    beatFrames: List[int] = field(default_factory=list)  # Exact frame indices of quarter-note beats
+    downbeatFrames: List[int] = field(default_factory=list)  # 1st-beat-of-bar downbeats
+    vocalEnergy: List[float] = field(default_factory=list)  # 30 FPS isolated vocal envelope
+    macroEnergy: List[float] = field(default_factory=list)  # 30 FPS structural build-up/drop curve
+    musicalKey: str = ""  # Harmonic key tonality (e.g. "D Minor")
 
 
 @dataclass

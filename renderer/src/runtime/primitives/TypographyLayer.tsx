@@ -82,7 +82,8 @@ export const TypographyLayer: React.FC<TypographyLayerProps> = ({
           "";
         if (!sText) return null;
         const sStart = s.frame_range?.[0] ?? 0;
-        const sEnd = s.frame_range?.[1] ?? (sStart + 45);
+        const currentEnd = stackedScenes.find((it) => it.isCurrent)?.scene?.frame_range?.[1];
+        const sEnd = currentEnd ?? s.frame_range?.[1] ?? (sStart + 45);
         const sDuration = Math.max(1, sEnd - sStart);
 
         // Law 1: Author only 2 font sizes: Body = 58px, Emphasis = 84px

@@ -129,7 +129,7 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             async with session.post(
                 f"{RENDERER_URL}/render",
                 json={"manifest": manifest_dict},
-                timeout=aiohttp.ClientTimeout(total=900),
+                timeout=aiohttp.ClientTimeout(total=1800),
             ) as resp:
                 if resp.status != 200:
                     err_text = await resp.text()

@@ -126,13 +126,20 @@ app.post("/render", async (req, res) => {
       outputLocation: outPath,
       inputProps,
       concurrency: 2,
+      onProgress: ({ renderedFrames }) => {
+        const total = renderDuration || composition.durationInFrames;
+        const pct = Math.round((renderedFrames / total) * 100);
+        if (renderedFrames % 100 === 0 || renderedFrames === total) {
+          console.log(`🎬 Render Progress: ${pct}% (${renderedFrames}/${total} frames)`);
+        }
+      },
       chromiumOptions: {
         disableWebSecurity: true,
         ignoreCertificateErrors: true,
         headless: true,
         gl: "angle",
       },
-      timeoutInMilliseconds: 900000,
+      timeoutInMilliseconds: 1800000,
     });
 
     console.log(`✅ Rendered: ${outPath}`);

@@ -93,7 +93,7 @@ void main() {
   vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0);
 
   // Dynamic point size modulated by bass pulse and camera distance
-  gl_PointSize = (18.0 + uBass * 16.0) * (300.0 / -mvPosition.z);
+  gl_PointSize = (4.0 + uBass * 4.5) * (300.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
@@ -109,15 +109,15 @@ void main() {
   float dist = length(coord);
   if (dist > 0.5) discard;
 
-  float alpha = smoothstep(0.5, 0.08, dist);
+  float alpha = smoothstep(0.5, 0.05, dist) * 0.75;
 
   // Golden-amber emissive ramp: #FFD700 (Gold) -> #FFA500 (Amber Orange)
   vec3 goldColor = vec3(1.0, 0.843, 0.0);
   vec3 amberColor = vec3(1.0, 0.647, 0.0);
   vec3 warmColor = mix(goldColor, amberColor, dist * 2.0);
 
-  // Emissive flare during high bass energy
-  vec3 finalColor = warmColor * (1.1 + uBass * 0.9 + vNoise * 0.3);
+  // Soft glowing particle
+  vec3 finalColor = warmColor * (0.8 + uBass * 0.4);
 
   gl_FragColor = vec4(finalColor, alpha);
 }
@@ -160,8 +160,8 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     renderer.setSize(width, height);
     renderer.setPixelRatio(1); // Explicit 1.0 pixel ratio for deterministic offscreen rendering
 
-    // Icosahedron with detail 6 creates ~20,480 points
-    const geometry = new THREE.IcosahedronGeometry(3.2, 6);
+    // Icosahedron with detail 4 creates ~2,562 points (optimal density, 8x faster rendering)
+    const geometry = new THREE.IcosahedronGeometry(3.2, 4);
 
     const material = new THREE.ShaderMaterial({
       vertexShader: particleVertexShader,

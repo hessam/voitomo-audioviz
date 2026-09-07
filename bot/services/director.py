@@ -1202,7 +1202,7 @@ def _record_spec_in_audit(
             "theme": spec.design_system.palette.bg,
             "alignment": spec.design_system.grid.alignment,
             "badgeLabel": s.badge or "نکته کلیدی",
-            "gridItems": bento_tiles,
+            "gridItems": bento_tiles if s.layout == "bento_grid" else None,
             "camera_dynamic": s.camera_dynamic
         })
     audit.record_director(

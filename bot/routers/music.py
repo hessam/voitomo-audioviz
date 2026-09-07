@@ -194,9 +194,10 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
         caption_extra = f"⚡ هماهنگ‌شده با ضرب‌آهنگ {rhythm_info.get('bpm')} BPM\n✦ پرده‌های روایی: {len(scenes)} پرده ریتمیک"
 
     try:
+        render_timeout = aiohttp.ClientTimeout(total=900, sock_connect=30, sock_read=900)
         async with RENDER_SEMAPHORE:
             async with aiohttp.ClientSession() as session:
-                async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+                async with session.post(RENDER_URL, json=props, timeout=render_timeout) as resp:
                     if resp.status != 200:
                         err = await resp.text()
                         await callback.message.answer(f"❌ خطا در رندر: {err}")
@@ -213,4 +214,6 @@ async def render_music_video(callback: CallbackQuery, state: FSMContext):
         )
 
     except Exception as e:
-        await callback.message.answer(f"❌ خطا در تولید ویدیو: {e}")
+        logger.exception("Music render error: %s", e)
+        err_msg = str(e).strip() or type(e).__name__
+        await callback.message.answer(f"❌ خطا در تولید ویدیو: {err_msg}")

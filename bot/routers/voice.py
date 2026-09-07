@@ -283,9 +283,10 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
 
     try:
         render_start = time.time()
+        render_timeout = aiohttp.ClientTimeout(total=900, sock_connect=30, sock_read=900)
         async with RENDER_SEMAPHORE:
             async with aiohttp.ClientSession() as session:
-                async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=360)) as resp:
+                async with session.post(RENDER_URL, json=props, timeout=render_timeout) as resp:
                     if resp.status != 200:
                         err = await resp.text()
                         await callback.message.answer(f"❌ خطا در رندر: {err}")
@@ -329,7 +330,12 @@ async def handle_style_choice(callback: CallbackQuery, state: FSMContext):
             reply_markup=audit_keyboard
         )
     except Exception as e:
-        await callback.message.answer(f"❌ خطای رندر: {e}")
+        logger.exception("Render exception: %s", e)
+        if isinstance(e, (asyncio.TimeoutError, aiohttp.ServerTimeoutError)):
+            err_msg = "مهلت زمانی رندر به پایان رسید (Timeout). ویدیوهای طولانی ممکن است کمی بیشتر زمان ببرند."
+        else:
+            err_msg = str(e).strip() or type(e).__name__
+        await callback.message.answer(f"❌ خطای رندر: {err_msg}")
 
 @router.callback_query(F.data.startswith("audit:"))
 async def handle_audit_callback(callback: CallbackQuery):
@@ -408,8 +414,9 @@ async def handle_word_edit(message: Message, state: FSMContext):
         }
 
     try:
+        render_timeout = aiohttp.ClientTimeout(total=900, sock_connect=30, sock_read=900)
         async with aiohttp.ClientSession() as session:
-            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=360)) as resp:
+            async with session.post(RENDER_URL, json=props, timeout=render_timeout) as resp:
                 render_result = await resp.json()
 
         video_path = render_result["path"]
@@ -422,4 +429,6 @@ async def handle_word_edit(message: Message, state: FSMContext):
             parse_mode="Markdown"
         )
     except Exception as e:
-        await message.answer(f"❌ خطا در بازسازی ویدیو: {e}")
+        logger.exception("Re-render exception: %s", e)
+        err_msg = str(e).strip() or type(e).__name__
+        await message.answer(f"❌ خطا در بازسازی ویدیو: {err_msg}")

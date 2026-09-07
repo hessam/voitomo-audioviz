@@ -45,58 +45,72 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", bundled: serveUrl !== null });
 });
 app.post("/render", async (req, res) => {
-  const { scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = req.body;
+  const { manifest, scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = req.body;
 
-  if (!creativeSpec && (!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
-    return res.status(400).json({ error: "creativeSpec, words, or scenes array required" });
+  if (!manifest && !creativeSpec && (!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
+    return res.status(400).json({ error: "manifest, creativeSpec, words, or scenes array required" });
   }
 
   try {
     const url = await ensureBundle();
-    const profileData = loadProfile(profileKey);
 
-    // Resolve audioSrc to an HTTP URL accessible by Chromium
+    const targetAudioSrc = manifest?.audio?.masterUri || audioSrc;
     let resolvedAudioSrc = "";
-    if (audioSrc && typeof audioSrc === "string") {
-      if (audioSrc.startsWith("http://") || audioSrc.startsWith("https://")) {
-        resolvedAudioSrc = audioSrc;
-      } else if (fs.existsSync(audioSrc)) {
+    if (targetAudioSrc && typeof targetAudioSrc === "string") {
+      if (targetAudioSrc.startsWith("http://") || targetAudioSrc.startsWith("https://")) {
+        resolvedAudioSrc = targetAudioSrc;
+      } else if (fs.existsSync(targetAudioSrc)) {
         const baseName = `audio-${Date.now()}`;
         const wavPath = path.join(AUDIO_DIR, `${baseName}.wav`);
         try {
-          // Convert to WAV with 44100Hz 2ch PCM for seamless Chromium audio decode
-          execSync(`ffmpeg -y -i "${audioSrc}" -ar 44100 -ac 2 "${wavPath}" 2>/dev/null`);
+          execSync(`ffmpeg -y -i "${targetAudioSrc}" -ar 44100 -ac 2 "${wavPath}" 2>/dev/null`);
           resolvedAudioSrc = `http://127.0.0.1:${PORT}/audio/${baseName}.wav`;
           console.log(`🎵 Audio converted to WAV: ${resolvedAudioSrc}`);
         } catch (convErr) {
           console.warn("⚠️ ffmpeg WAV conversion failed, serving original file:", convErr);
-          const ext = path.extname(audioSrc) || ".ogg";
+          const ext = path.extname(targetAudioSrc) || ".ogg";
           const copyPath = path.join(AUDIO_DIR, `${baseName}${ext}`);
-          fs.copyFileSync(audioSrc, copyPath);
+          fs.copyFileSync(targetAudioSrc, copyPath);
           resolvedAudioSrc = `http://127.0.0.1:${PORT}/audio/${baseName}${ext}`;
         }
       }
     }
 
-    const isSwissSpec = !!creativeSpec;
-    const inputProps = isSwissSpec
-      ? {
-          creativeSpec,
-          audioSrc: resolvedAudioSrc,
-          durationInFrames: durationInFrames || creativeSpec.meta?.total_frames || 300,
-          words: words || [],
-        }
-      : {
-          scenes: scenes || [],
-          words: words || [],
-          text: text || "",
-          audioSrc: resolvedAudioSrc,
-          durationInFrames: durationInFrames || 300,
-          profile: profileKey,
-          profileData,
-        };
+    let inputProps: any;
+    let targetCompositionId: string;
+    let renderDuration = durationInFrames;
 
-    const targetCompositionId = isSwissSpec ? "VoitomoSwiss" : "VoiceMotion";
+    if (manifest) {
+      targetCompositionId = "AudiovizMaster";
+      renderDuration = manifest.video?.frameCount || durationInFrames || 300;
+      inputProps = {
+        manifest,
+        audioSrc: resolvedAudioSrc,
+      };
+    } else if (creativeSpec) {
+      targetCompositionId = "VoitomoSwiss";
+      renderDuration = durationInFrames || creativeSpec.meta?.total_frames || 300;
+      inputProps = {
+        creativeSpec,
+        audioSrc: resolvedAudioSrc,
+        durationInFrames: renderDuration,
+        words: words || [],
+      };
+    } else {
+      const profileData = loadProfile(profileKey);
+      targetCompositionId = "VoiceMotion";
+      renderDuration = durationInFrames || 300;
+      inputProps = {
+        scenes: scenes || [],
+        words: words || [],
+        text: text || "",
+        audioSrc: resolvedAudioSrc,
+        durationInFrames: renderDuration,
+        profile: profileKey,
+        profileData,
+      };
+    }
+
     const composition = await selectComposition({
       serveUrl: url,
       id: targetCompositionId,

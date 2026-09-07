@@ -61,8 +61,9 @@ async def handle_edit(message: Message, state: FSMContext):
         }
 
     try:
+        render_timeout = aiohttp.ClientTimeout(total=900, sock_connect=30, sock_read=900)
         async with aiohttp.ClientSession() as session:
-            async with session.post(RENDER_URL, json=props, timeout=aiohttp.ClientTimeout(total=360)) as resp:
+            async with session.post(RENDER_URL, json=props, timeout=render_timeout) as resp:
                 if resp.status != 200:
                     err = await resp.text()
                     await message.answer(f"❌ خطا در رندر: {err}")
@@ -79,4 +80,6 @@ async def handle_edit(message: Message, state: FSMContext):
             parse_mode="Markdown"
         )
     except Exception as e:
-        await message.answer(f"❌ خطا: {e}")
+        logger.exception("Edit render error: %s", e)
+        err_msg = str(e).strip() or type(e).__name__
+        await message.answer(f"❌ خطا: {err_msg}")

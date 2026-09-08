@@ -15,10 +15,12 @@ async function main() {
     id: "ParticleSphereViz",
     inputProps: {
       features: {
-        bass: new Array(100).fill(0.6),
-        mids: new Array(100).fill(0.4),
-        treble: new Array(100).fill(0.3),
-        transients: [],
+        bass:        new Array(100).fill(0.55),
+        mids:        new Array(100).fill(0.40),
+        treble:      new Array(100).fill(0.30),
+        vocalEnergy: new Array(100).fill(0.65),
+        transients:  [],
+        beatFrames:  [0, 15, 30, 45, 60],
       },
     },
   });

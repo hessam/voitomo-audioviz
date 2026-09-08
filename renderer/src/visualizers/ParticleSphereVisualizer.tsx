@@ -75,6 +75,7 @@ uniform float uTime;
 uniform float uBass;
 uniform float uMids;
 uniform float uTreble;
+uniform float uVocal;
 uniform float uTransient;
 uniform float uBeat;
 varying float vFresnel;
@@ -92,39 +93,46 @@ void main() {
   vTransient = uTransient;
 
   vec3 n = normalize(position);
-  vec3 p = position * 0.90;
+  vec3 p = position;
 
-  // 1. Broad rolling organic folds (speed modulated by mids/vocals)
-  float n1 = snoise(p * 0.85 + vec3(uTime * 0.16 + uMids * 0.20, uTime * 0.08, 0.0));
-  float n2 = snoise(p * 1.70 - vec3(0.0, uTime * 0.22 + uMids * 0.30, uTime * 0.10));
+  // 1. Organic swirling field speed-modulated by vocal and mids
+  float flowTime = uTime * 0.22 + uVocal * 1.6 + uMids * 1.1;
+  float n1 = snoise(p * 0.72 + vec3(flowTime * 0.18, flowTime * 0.12, 0.0));
+  float n2 = snoise(p * 1.45 - vec3(0.0, flowTime * 0.20, flowTime * 0.08));
 
-  // 2. Corrugated ripple ridges dynamically driven by mids and vocal energy
-  float ridgeNoise = snoise(p * 1.50 + vec3(uTime * 0.12));
-  float ridges = sin(position.y * 12.0 + ridgeNoise * 3.4 + uTime * 0.28 + uMids * 1.6) * (0.18 + uMids * 0.12);
-  vRidge = ridges;
+  // 2. Harmonic fingerprint ridges running across the sphere surface
+  // Wave phase advances with time and vocal/mid energy
+  float wavePhase = p.y * 6.5 + p.x * 2.2 + n1 * 3.2 + flowTime * 0.85;
+  float ridgeRaw = sin(wavePhase);
+  // Sharp crests with smooth valleys: creates the distinct lines of dots
+  float ridgeCrest = smoothstep(-0.25, 0.75, ridgeRaw);
+  vRidge = ridgeCrest;
 
-  // 3. High-frequency micro-jitter driven by treble / hi-hats
-  vec3 trebleJitter = n * (snoise(position * 8.0 + vec3(uTime * 3.0)) * uTreble * 0.045);
-
-  // Calibrated displacement with bass swell, rhythmic beat impulse, and transient shockwave
-  float disp = (n1 * 0.36 + n2 * 0.18 + ridges * 0.46) * (0.48 + uBass * 0.40 + uBeat * 0.20) + uTransient * 0.22;
+  // 3. Audio-reactive surface displacement:
+  // Vocals & mids directly modulate the ridge wave height!
+  float ridgeAmp = 0.26 + uVocal * 0.28 + uMids * 0.16;
+  float baseAmp = 0.12 + n2 * 0.08 + uBass * 0.05; // Subtle bass breathing only!
+  float disp = ridgeCrest * ridgeAmp + baseAmp;
   vDisp = disp;
+
+  // 4. Treble micro-shimmer on individual particles
+  vec3 trebleJitter = n * (snoise(position * 7.0 + vec3(uTime * 4.0)) * uTreble * 0.035);
 
   vec3 displacedPosition = position + n * disp + trebleJitter;
   vec4 mvPosition = modelViewMatrix * vec4(displacedPosition, 1.0);
 
-  // View-space normal for rim halo and frontal lighting
-  vec3 viewNormal = normalize(normalMatrix * (n + vec3(n2 * 0.10, ridges * 0.20, 0.0)));
+  // Normal calculation for directional lighting and rim calculation
+  vec3 viewNormal = normalize(normalMatrix * (n + vec3(n2 * 0.15, ridgeCrest * 0.25, 0.0)));
   vNormal = viewNormal;
   vec3 viewDir = normalize(-mvPosition.xyz);
   vFresnel = clamp(1.0 - max(dot(viewNormal, viewDir), 0.0), 0.0, 1.0);
 
-  // Soft front-facing factor: allows smooth wrap without back-hemisphere blowout
-  vFacing = smoothstep(-0.35, 0.20, dot(viewNormal, viewDir));
+  // Soft front-facing factor: cull back hemisphere to prevent blowout
+  vFacing = smoothstep(-0.05, 0.25, dot(viewNormal, viewDir));
 
-  // Fine pinpoint dot sizing with transient burst
-  float pSize = (2.3 + uBass * 0.8 + uTransient * 1.2) * (260.0 / -mvPosition.z);
-  gl_PointSize = clamp(pSize, 1.5, 6.0);
+  // Point size: pin-point, clean, sharp dots (no ballooning!)
+  float pSize = (2.2 + uTreble * 0.5) * (270.0 / -mvPosition.z);
+  gl_PointSize = clamp(pSize, 1.4, 4.5);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
@@ -140,6 +148,7 @@ varying float vTreble;
 varying float vTransient;
 uniform float uBass;
 uniform float uMids;
+uniform float uVocal;
 uniform float uBeat;
 
 void main() {
@@ -149,46 +158,43 @@ void main() {
   float dist = length(coord);
   if (dist > 0.5) discard;
 
-  float alphaMask = smoothstep(0.5, 0.16, dist);
+  // Soft circular anti-aliased dot mask
+  float alphaMask = smoothstep(0.5, 0.18, dist);
 
-  // 1:1 Reference Golden Color Ramp
-  vec3 deepAmber = vec3(0.96, 0.42, 0.01);
-  vec3 richGold = vec3(1.0, 0.78, 0.03);
-  vec3 crestYellow = vec3(1.0, 0.92, 0.14);
-  vec3 rimGold = vec3(1.0, 0.96, 0.24);
-  vec3 hotGold = vec3(1.0, 0.99, 0.42);
+  // Reference 1:1 Palette (Radiant Honey Gold, NO cold white)
+  vec3 valleyDark  = vec3(0.50, 0.22, 0.015); // Warm glowing amber in valleys
+  vec3 ridgeAmber  = vec3(0.92, 0.55, 0.030); // Rich warm gold on slopes
+  vec3 brightGold  = vec3(1.00, 0.82, 0.080); // Radiant warm golden crest
+  vec3 crestYellow = vec3(1.00, 0.94, 0.200); // Luminous yellow-gold crest highlight
+  vec3 rimCorona   = vec3(1.00, 0.86, 0.160); // Warm golden rim corona
 
-  float dispFactor = clamp(vDisp * 2.2 + 0.50, 0.0, 1.0);
-  vec3 col = mix(deepAmber, richGold, dispFactor);
+  // 1. Ridge shading: valleys are warm amber, crests are blazing gold
+  vec3 col = mix(valleyDark, ridgeAmber, smoothstep(0.0, 0.45, vRidge));
+  col = mix(col, brightGold, smoothstep(0.45, 0.90, vRidge));
 
-  // Highlight the corrugated ridges
-  float ridgeFactor = smoothstep(-0.05, 0.12, vRidge);
-  col = mix(col, crestYellow, ridgeFactor * 0.85);
+  // 2. Frontal key light illuminates the facing ridges, creating rich 3D depth
+  vec3 lightDir = normalize(vec3(0.20, 0.35, 0.90));
+  float NdotL = max(dot(vNormal, lightDir), 0.0);
+  col += crestYellow * pow(NdotL, 1.8) * vRidge * 0.45;
 
-  // Front lighting illuminates the center ridges
-  vec3 lightDir = normalize(vec3(0.0, 0.2, 1.0));
-  float frontLight = max(dot(vNormal, lightDir), 0.0);
-  col += richGold * pow(frontLight, 1.4) * 0.45;
+  // Ambient front core warmth so the center is filled with golden dots
+  col += vec3(0.35, 0.18, 0.01) * (1.0 - vFresnel * 0.6);
 
-  // Luminous core warmth
-  float coreGlow = smoothstep(0.85, 0.0, vFresnel);
-  col += deepAmber * coreGlow * 0.35;
+  // 3. Incandescent golden rim halo
+  float rim = pow(vFresnel, 2.2);
+  col = mix(col, rimCorona, rim * 0.65);
+  col += vec3(1.0, 0.90, 0.25) * pow(vFresnel, 3.8) * 0.75;
 
-  // Concentrated golden rim halo
-  float rim = pow(vFresnel, 2.0);
-  col = mix(col, rimGold, rim * 0.88);
-  col += hotGold * pow(vFresnel, 3.8) * 1.30;
+  // 4. Treble twinkle on individual points
+  float sparkle = sin(coord.x * 20.0 + coord.y * 20.0 + vTreble * 12.0) * vTreble;
+  col += vec3(0.25, 0.20, 0.04) * max(0.0, sparkle);
 
-  // High-frequency treble sparkle on individual dots
-  float sparkle = sin(coord.x * 24.0 + coord.y * 24.0 + vTreble * 10.0) * vTreble;
-  col += vec3(0.20, 0.18, 0.04) * max(0.0, sparkle);
+  // 5. Transient energy pulse along the crests (brightens without deforming)
+  col += vec3(0.35, 0.28, 0.05) * (vTransient * vRidge);
 
-  // Instantaneous incandescent flash on beat drop / drum transient
-  col += hotGold * (vTransient * 0.65 + uBeat * 0.28);
-
-  // Alpha curve preserves dot definition while making the whole orb luminous
-  float alpha = alphaMask * vFacing * mix(0.85, 1.0, rim);
-  gl_FragColor = vec4(col * (1.15 + uBass * 0.25), alpha);
+  // Alpha preserves dot separation and allows dark valleys to show through
+  float alpha = alphaMask * vFacing * (0.80 + rim * 0.20);
+  gl_FragColor = vec4(col * (1.10 + uBass * 0.15), alpha);
 }
 `;
 
@@ -244,7 +250,7 @@ void main() {
 const spotLensVertexShader = `
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  gl_PointSize = 10.0 * (260.0 / -mvPosition.z);
+  gl_PointSize = 4.2 * (260.0 / -mvPosition.z);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
@@ -340,6 +346,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
         uTime: { value: 0.0 },
         uBass: { value: 0.0 },
         uMids: { value: 0.0 },
+        uVocal: { value: 0.0 },
         uTreble: { value: 0.0 },
         uTransient: { value: 0.0 },
         uBeat: { value: 0.0 },
@@ -390,16 +397,16 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
           vec3 p = position;
           float side = sign(position.x);
 
-          // Audio-reactive lateral expansion on beat drops and bass swells
-          p.x += side * (uBass * 0.40 + uTransient * 1.15 + uBeat * 0.50);
-          p.y += sin(uTime * 0.5 + position.x * 1.5) * 0.12 + (uTransient * 0.35);
-          p.z += cos(uTime * 0.4 + position.y * 1.5) * 0.10;
+          // Smooth gentle floating drift (no violent jumping on kicks)
+          p.x += side * (uBass * 0.08 + uTransient * 0.30);
+          p.y += sin(uTime * 0.4 + position.x * 1.2) * 0.10 + (uTransient * 0.12);
+          p.z += cos(uTime * 0.3 + position.y * 1.2) * 0.08;
 
-          vTwinkle = sin(uTime * 14.0 + position.x * 6.0) * uTreble;
+          vTwinkle = sin(uTime * 12.0 + position.x * 5.0) * uTreble;
 
           vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
-          float pSize = (2.4 + uTransient * 2.2 + uBass * 1.0) * (280.0 / -mvPosition.z);
-          gl_PointSize = clamp(pSize, 1.2, 7.5);
+          float pSize = (2.0 + uTransient * 0.8 + uTreble * 0.6) * (260.0 / -mvPosition.z);
+          gl_PointSize = clamp(pSize, 1.2, 5.0);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -411,10 +418,10 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
           float dist = length(coord);
           if (dist > 0.5) discard;
 
-          float twinkle = 0.85 + 0.30 * vTwinkle;
-          float alpha = smoothstep(0.5, 0.12, dist) * 0.90 * twinkle;
-          vec3 sparkCol = mix(vec3(1.0, 0.82, 0.15), vec3(1.0, 0.98, 0.70), uTransient);
-          gl_FragColor = vec4(sparkCol * (1.0 + uTransient * 1.5), alpha);
+          float twinkle = 0.85 + 0.35 * vTwinkle;
+          float alpha = smoothstep(0.5, 0.15, dist) * 0.85 * twinkle;
+          vec3 sparkCol = vec3(1.0, 0.78, 0.12);
+          gl_FragColor = vec4(sparkCol * (1.0 + uTransient * 0.8), alpha);
         }
       `,
       uniforms: {
@@ -579,6 +586,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     orbMaterial.uniforms.uTime.value = timeSeconds;
     orbMaterial.uniforms.uBass.value = bass;
     orbMaterial.uniforms.uMids.value = mids;
+    orbMaterial.uniforms.uVocal.value = vocal;
     orbMaterial.uniforms.uTreble.value = treble;
     orbMaterial.uniforms.uTransient.value = transientImpulse;
     orbMaterial.uniforms.uBeat.value = beatImpulse;
@@ -594,16 +602,15 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     floorMaterial.uniforms.uTransient.value = transientImpulse;
 
     // Slow organic Y-axis rotation
-    orbPoints.rotation.y = timeSeconds * 0.15;
-    orbPoints.rotation.x = Math.sin(timeSeconds * 0.08) * 0.05;
+    orbPoints.rotation.y = timeSeconds * 0.12;
+    orbPoints.rotation.x = Math.sin(timeSeconds * 0.06) * 0.04;
 
-    // Bass & Beat-driven scale pulsation
-    const scale = 1.0 + (bass * 0.12 + beatImpulse * 0.08 + transientImpulse * 0.14);
+    // Smooth organic bass breathing only (no violent jumping on kicks)
+    const scale = 1.0 + (bass * 0.035);
     orbPoints.scale.set(scale, scale, scale);
 
-    // Dynamic Camera breathing with rhythm
-    const cameraPunch = beatImpulse * 0.15 + transientImpulse * 0.28;
-    camera.position.z = 9.4 - cameraPunch;
+    // Locked cinematic camera: rock solid framing, zero camera shaking
+    camera.position.set(0, 0.12, 9.35);
 
     renderer.render(scene, camera);
   }

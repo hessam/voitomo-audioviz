@@ -154,9 +154,9 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             compressed_path = rendered_mp4.replace(".mp4", "_tg_compat.mp4")
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y", "-i", rendered_mp4,
-                "-c:v", "libx264", "-b:v", "5000k", "-maxrate", "6000k", "-bufsize", "10000k",
+                "-c:v", "libx264", "-b:v", "5500k", "-maxrate", "7000k", "-bufsize", "12000k",
                 "-c:a", "aac", "-b:a", "192k",
-                "-preset", "fast", "-movflags", "+faststart",
+                "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 compressed_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

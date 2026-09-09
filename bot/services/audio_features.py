@@ -264,7 +264,7 @@ class AudioFeatureExtractor:
                 parameters=preset_params or {},
             ),
             video=VideoConfig(
-                width=1080,
+                width=1920,
                 height=1080,
                 fpsNumerator=30,
                 fpsDenominator=1,

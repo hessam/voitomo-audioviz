@@ -39,7 +39,7 @@ class PresetConfig:
 
 @dataclass
 class VideoConfig:
-    width: int = 1080
+    width: int = 1920
     height: int = 1080
     fpsNumerator: int = 30
     fpsDenominator: int = 1

@@ -60,11 +60,12 @@ uniform float uTreble;
 uniform float uVocal;
 uniform float uTransient;
 uniform float uBeat;
-varying float vFresnel;
-varying float vDisp;
-varying float vFacing;
+
 varying float vRidge;
-varying vec3 vNormal;
+varying float vFacing;
+varying float vFresnel;
+varying float vDepth;
+varying float vDisp;
 varying float vTreble;
 varying float vTransient;
 
@@ -75,87 +76,154 @@ void main() {
   vTransient = uTransient;
 
   vec3 n = normalize(position);
-  vec3 p = position;
 
-  float flowTime = uTime * 0.18 + uVocal * 1.4 + uMids * 0.9;
-  float n1 = snoise(p * 0.68 + vec3(flowTime * 0.16, flowTime * 0.10, 0.0));
-  float n2 = snoise(p * 1.35 - vec3(0.0, flowTime * 0.18, flowTime * 0.07));
+  // Time & stem flow dynamics
+  float flowTime = uTime * 0.22 + uVocal * 1.20 + uMids * 0.80;
 
-  float wavePhase = p.y * 20.0 + p.x * 2.5 + n1 * 1.8 + flowTime * 0.45;
-  float ridgeRaw = sin(wavePhase);
-  float ridgeCrest = smoothstep(-0.05, 0.65, ridgeRaw);
-  vRidge = ridgeCrest;
+  // 1. Multi-octave 3D Simplex noise folds the surface into smooth undulating organic lobes
+  // Large scale: broad, majestic rolling lobes that bulge outward and fold inward
+  vec3 pLobe = n * 1.15 + vec3(flowTime * 0.16, flowTime * 0.11, flowTime * 0.08);
+  float nLobe = snoise(pLobe);
 
-  float breathAmp = 0.04 + n2 * 0.02 + uBass * 0.015;
-  float disp = breathAmp;
-  vDisp = disp;
+  // Medium scale: secondary undulating folds
+  vec3 pFold = n * 2.30 - vec3(flowTime * 0.12, 0.0, flowTime * 0.16);
+  float nFold = snoise(pFold);
 
-  vec3 trebleJitter = n * (snoise(position * 8.0 + vec3(uTime * 4.5)) * uTreble * 0.028);
-  vec3 displacedPosition = position + n * disp + trebleJitter;
+  // Fine scale: gentle surface waviness
+  vec3 pRipple = n * 4.40 + vec3(flowTime * 0.22);
+  float nRipple = snoise(pRipple);
+
+  // Base structural organic displacement (harmonious rolling lobes)
+  float baseDisp = nLobe * 0.58 + nFold * 0.22 + nRipple * 0.06;
+
+  // High-amplitude audio dynamics:
+  // Bass drops and transients trigger dynamic morphing shape warps and shockwaves
+  float bassWarp = nLobe * (uBass * 0.80 + uTransient * 0.55);
+  float midsWarp = nFold * (uMids * 0.40 + uVocal * 0.30);
+  float shockwave = sin(length(position) * 3.2 - uTime * 5.5) * (uBeat * 0.18 + uTransient * 0.22);
+
+  float totalDisp = baseDisp + bassWarp + midsWarp + shockwave;
+  vDisp = totalDisp;
+
+  // Vertex displacement directly along normals: position + normal * noise * amplitude
+  vec3 displacedPosition = position + n * totalDisp;
+
+  // Topographical contour bands wrapping along the organic lobes
+  // Higher frequency (18.0) yields fine, elegant topographic striations
+  float topoElevation = displacedPosition.y * 18.0 + nLobe * 5.2 + nFold * 2.6 + flowTime * 0.42;
+  float topoLine = sin(topoElevation);
+  vRidge = smoothstep(-0.15, 0.62, topoLine);
+
+  // Transform to view space
   vec4 mvPosition = modelViewMatrix * vec4(displacedPosition, 1.0);
+  vDepth = -mvPosition.z;
 
-  vec3 viewNormal = normalize(normalMatrix * (n + vec3(n2 * 0.12, ridgeCrest * 0.22, 0.0)));
-  vNormal = viewNormal;
+  // View direction & normal (calculated for both front and back particles)
+  vec3 viewNormal = normalize(normalMatrix * (n + vec3(nFold * 0.15, nLobe * 0.18, 0.0)));
   vec3 viewDir = normalize(-mvPosition.xyz);
-  vFresnel = clamp(1.0 - max(dot(viewNormal, viewDir), 0.0), 0.0, 1.0);
-  vFacing  = smoothstep(-0.05, 0.05, dot(viewNormal, viewDir));
+  vFacing = dot(viewNormal, viewDir);
+  vFresnel = clamp(1.0 - abs(vFacing), 0.0, 1.0);
 
-  float pSize = (1.8 + uTreble * 0.4) * (300.0 / -mvPosition.z);
-  gl_PointSize = clamp(pSize, 1.2, 3.8);
+  // Point size: perspective scaled, crisp fine dots
+  float pSize = (3.4 + uTreble * 0.6 + vRidge * 0.8) * (360.0 / -mvPosition.z);
+  gl_PointSize = clamp(pSize, 1.6, 5.2);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
 const particleFragmentShader = `
-varying float vFresnel;
-varying float vDisp;
-varying float vFacing;
 varying float vRidge;
-varying vec3 vNormal;
+varying float vFacing;
+varying float vFresnel;
+varying float vDepth;
+varying float vDisp;
 varying float vTreble;
 varying float vTransient;
+
 uniform float uBass;
 uniform float uMids;
 uniform float uVocal;
+uniform float uTransient;
 uniform float uBeat;
 
 void main() {
-  if (vFacing < 0.02) discard;
-
+  // Soft circular dot shape
   vec2 coord = gl_PointCoord - vec2(0.5);
   float dist = length(coord);
   if (dist > 0.5) discard;
 
-  float alphaMask = smoothstep(0.5, 0.16, dist);
+  float alphaMask = smoothstep(0.5, 0.10, dist);
 
-  // Valley dots glow with mid-amber — sphere is fully lit, no dark voids
-  vec3 valleyDark  = vec3(0.70, 0.38, 0.015);  // mid-amber, not near-black
-  vec3 slopeAmber  = vec3(0.88, 0.55, 0.025);
-  vec3 crestGold   = vec3(1.00, 0.80, 0.070);
-  vec3 blazeGold   = vec3(1.00, 0.92, 0.140);
-  vec3 rimWarm     = vec3(1.00, 0.82, 0.140);
+  // Palette: rich incandescent 2200K honey-gold
+  vec3 valleyAmber = vec3(0.76, 0.38, 0.015);  // Warm glowing honey amber
+  vec3 slopeGold   = vec3(0.96, 0.64, 0.040);  // Rich incandescent gold
+  vec3 crestBright = vec3(1.00, 0.88, 0.150);  // Intense brilliant gold crest
+  vec3 blazeWhite  = vec3(1.00, 0.98, 0.550);  // Incandescent overlapping blaze
 
-  vec3 col = mix(valleyDark, slopeAmber, smoothstep(0.0, 0.35, vRidge));
-  col      = mix(col, crestGold,  smoothstep(0.35, 0.70, vRidge));
-  col      = mix(col, blazeGold,  smoothstep(0.70, 1.00, vRidge));
+  // Topographic contour shading
+  vec3 col = mix(valleyAmber, slopeGold, smoothstep(0.0, 0.38, vRidge));
+  col      = mix(col, crestBright, smoothstep(0.38, 0.72, vRidge));
+  col      = mix(col, blazeWhite,  smoothstep(0.72, 1.00, vRidge) * 0.75);
 
-  vec3 lightDir = normalize(vec3(0.15, 0.25, 1.0));
-  float NdotL = max(dot(vNormal, lightDir), 0.0);
-  col += blazeGold * pow(NdotL, 2.2) * vRidge * 0.35;
+  // Volumetric translucency & depth cues:
+  // Both front-facing and backside particles render additively
+  // Back particles are slightly softer; front particles crisp
+  float facingWeight = 0.60 + 0.40 * clamp(vFacing * 0.85 + 0.25, 0.0, 1.0);
 
-  col += vec3(0.45, 0.20, 0.010) * (1.0 - vFresnel * 0.5);
+  // Rim / edge accumulation glow (glowing silhouette contour)
+  float rim = pow(vFresnel, 2.0);
+  vec3 rimWarm = vec3(1.00, 0.85, 0.180);
+  col += rimWarm * (rim * 0.50);
 
-  float rim = pow(vFresnel, 2.5);
-  col = mix(col, rimWarm, rim * 0.55);
-  col += vec3(0.95, 0.72, 0.10) * pow(vFresnel, 4.0) * 0.60;
+  // Energy flare on bass/transient drops
+  col *= (1.05 + uBass * 0.30 + uTransient * 0.40);
 
-  float sparkle = sin(coord.x * 18.0 + coord.y * 18.0 + vTreble * 10.0) * vTreble;
-  col += vec3(0.22, 0.16, 0.03) * max(0.0, sparkle);
+  // Additive blending alpha:
+  // Points accumulate density in the dense core and overlapping folds
+  float alpha = alphaMask * facingWeight * (0.65 + rim * 0.35 + vRidge * 0.25);
 
-  col += vec3(0.30, 0.22, 0.04) * (vTransient * vRidge);
+  gl_FragColor = vec4(col, alpha);
+}
+`;
 
-  float alpha = alphaMask * vFacing * (0.82 + rim * 0.18);
-  gl_FragColor = vec4(col * (1.08 + uBass * 0.12), alpha);
+const sparkVertexShader = `
+uniform float uTime;
+uniform float uBass;
+uniform float uTreble;
+uniform float uTransient;
+varying float vAlpha;
+
+void main() {
+  vec3 p = position;
+  vec3 dir = normalize(position);
+
+  // Subtle radial expansion and orbital drift
+  p += dir * (sin(uTime * 0.6 + length(position) * 1.5) * 0.15 + uBass * 0.25 + uTransient * 0.35);
+  p.y += sin(uTime * 0.45 + position.x) * 0.10;
+
+  float distFromCenter = length(p);
+  float fade = smoothstep(6.5, 2.8, distFromCenter);
+  vAlpha = fade * (0.60 + 0.40 * sin(uTime * 5.0 + position.y * 3.0));
+
+  vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+  float pSize = (1.8 + uTreble * 0.6 + uTransient * 0.8) * (300.0 / -mvPosition.z);
+  gl_PointSize = clamp(pSize, 1.0, 3.8);
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+const sparkFragmentShader = `
+varying float vAlpha;
+uniform float uTransient;
+
+void main() {
+  vec2 coord = gl_PointCoord - vec2(0.5);
+  float dist = length(coord);
+  if (dist > 0.5) discard;
+
+  float mask = smoothstep(0.5, 0.10, dist);
+  vec3 sparkCol = vec3(1.00, 0.78, 0.15);
+  gl_FragColor = vec4(sparkCol * (1.1 + uTransient * 0.5), mask * vAlpha * 0.75);
 }
 `;
 
@@ -181,41 +249,22 @@ varying vec2 vUv;
 SIMPLEX_NOISE_GLSL
 
 void main() {
-  vec3 floorBase = vec3(0.008, 0.010, 0.014);
+  vec3 floorBase = vec3(0.005, 0.006, 0.009);
 
   float dx = vWorldPos.x - uOrbPos.x;
   float dz = vWorldPos.z - uOrbPos.z;
 
-  float spreadX = 1.6 + uBass * 0.4 + uTransient * 0.6;
-  float reflShape = exp(-(dx * dx / spreadX + dz * dz / 8.0));
+  float spreadX = 2.4 + uBass * 0.6 + uTransient * 0.8;
+  float reflShape = exp(-(dx * dx / spreadX + dz * dz / 9.0));
 
-  float floorGrain = snoise(vec3(vWorldPos.x * 3.0, vWorldPos.z * 7.0, 0.0)) * 0.10;
-  float totalRefl = clamp(reflShape * (0.90 + floorGrain), 0.0, 1.0);
+  float floorGrain = snoise(vec3(vWorldPos.x * 2.5, vWorldPos.z * 6.0, 0.0)) * 0.08;
+  float totalRefl = clamp(reflShape * (0.85 + floorGrain), 0.0, 1.0);
 
-  vec3 goldReflection = vec3(1.0, 0.58, 0.05) * (1.20 + uBass * 0.35 + uBeat * 0.25 + uTransient * 0.50);
+  vec3 goldReflection = vec3(1.0, 0.58, 0.05) * (1.15 + uBass * 0.40 + uBeat * 0.25 + uTransient * 0.50);
   vec3 finalColor = floorBase + goldReflection * totalRefl;
 
-  float vignette = smoothstep(22.0, 3.0, length(vWorldPos.xz));
+  float vignette = smoothstep(24.0, 4.0, length(vWorldPos.xz));
   gl_FragColor = vec4(finalColor * vignette, 1.0);
-}
-`;
-
-const spotLensVertexShader = `
-void main() {
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  gl_PointSize = 3.2 * (220.0 / -mvPosition.z);
-  gl_Position = projectionMatrix * mvPosition;
-}
-`;
-
-const spotLensFragmentShader = `
-void main() {
-  vec2 coord = gl_PointCoord - vec2(0.5);
-  float dist = length(coord);
-  if (dist > 0.5) discard;
-  float glow = pow(smoothstep(0.5, 0.0, dist), 2.5);
-  vec3 lensColor = vec3(0.98, 0.88, 0.72) * glow;
-  gl_FragColor = vec4(lensColor, glow * 0.65);
 }
 `;
 
@@ -247,13 +296,12 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     if (!canvasRef.current) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#020304");
-    scene.fog = new THREE.FogExp2(0x020304, 0.032);
+    scene.background = new THREE.Color("#020204");
 
-    // FOV 42 + z=13.5 -> sphere fills ~50% frame height
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-    camera.position.set(0, 0.20, 13.5);
-    camera.lookAt(0, 0.30, 0);
+    // 16:9 widescreen perspective camera (orb fills ~65% of vertical frame height)
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000);
+    camera.position.set(0, 0.25, 12.8);
+    camera.lookAt(0, 0.25, 0);
 
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
@@ -265,30 +313,35 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     renderer.setSize(width, height);
     renderer.setPixelRatio(1);
 
+    // Uniform spherical point distribution (Fibonacci lattice, 60,000 equidistant points)
+    // Completely uniform coverage with zero poles, zero latitudinal banding, and optimal packing
     const orbPositions: number[] = [];
-    const numRings = 200;
-    const sphereRadius = 2.20;
+    const N = 60000;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const baseRadius = 2.40;
 
-    for (let i = 0; i < numRings; i++) {
-      const lat = ((i + 0.5) / numRings - 0.5) * Math.PI * 0.94;
-      const rRing = Math.cos(lat) * sphereRadius;
-      const yRing = Math.sin(lat) * sphereRadius;
-      const pointsInRing = Math.max(12, Math.round(440 * Math.cos(lat)));
-      for (let j = 0; j < pointsInRing; j++) {
-        const lon = (j / pointsInRing) * Math.PI * 2;
-        orbPositions.push(Math.cos(lon) * rRing, yRing, Math.sin(lon) * rRing);
-      }
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (i / (N - 1)) * 2;
+      const rAtY = Math.sqrt(Math.max(0, 1 - y * y));
+      const theta = goldenAngle * i;
+      orbPositions.push(
+        Math.cos(theta) * rAtY * baseRadius,
+        y * baseRadius,
+        Math.sin(theta) * rAtY * baseRadius
+      );
     }
 
     const orbGeometry = new THREE.BufferGeometry();
     orbGeometry.setAttribute("position", new THREE.Float32BufferAttribute(orbPositions, 3));
-    orbGeometry.rotateX(-0.12);
-    orbGeometry.rotateY(0.22);
+    orbGeometry.rotateX(-0.10);
+    orbGeometry.rotateY(0.20);
 
-    // Inject simplex noise into shaders
+    // Inject Simplex noise into shaders
     const vsWithNoise = particleVertexShader.replace("SIMPLEX_NOISE_GLSL", simplexNoiseGLSL);
     const fsFloorWithNoise = floorFragmentShader.replace("SIMPLEX_NOISE_GLSL", simplexNoiseGLSL);
 
+    // Volumetric translucency: Additive blending with depthWrite false
+    // allows backside and interior particles to blend naturally through the front
     const orbMaterial = new THREE.ShaderMaterial({
       vertexShader: vsWithNoise,
       fragmentShader: particleFragmentShader,
@@ -304,77 +357,43 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      depthTest: true,
     });
 
     const orbPoints = new THREE.Points(orbGeometry, orbMaterial);
     orbPoints.position.set(0, 0.30, 0);
     scene.add(orbPoints);
 
-    // Embers: tight clusters at sphere sides only
-    const sparkCount = 600;
+    // Subtle floating radial embers drifting outward into dark air
+    const sparkCount = 450;
     const sparkGeo = new THREE.BufferGeometry();
     const sparkPos = new Float32Array(sparkCount * 3);
 
-    let seed = 87654;
+    let seed = 91823;
     const rand = () => {
       seed = (seed * 16807) % 2147483647;
       return (seed - 1) / 2147483646;
     };
 
     for (let i = 0; i < sparkCount; i++) {
-      const side = rand() > 0.5 ? 1 : -1;
-      const r = Math.pow(rand(), 0.8);
-      sparkPos[i * 3]     = side * (2.3 + r * 2.8);
-      sparkPos[i * 3 + 1] = (rand() - 0.42) * 2.0 + 0.30 + (1.0 - r) * 0.25;
-      sparkPos[i * 3 + 2] = (rand() - 0.5) * 1.4;
+      const theta = rand() * Math.PI * 2;
+      const phi = Math.acos(2 * rand() - 1);
+      const r = 2.6 + Math.pow(rand(), 1.4) * 3.4;
+
+      sparkPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+      sparkPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) + 0.30;
+      sparkPos[i * 3 + 2] = r * Math.cos(phi);
     }
 
     sparkGeo.setAttribute("position", new THREE.BufferAttribute(sparkPos, 3));
     const sparkMaterial = new THREE.ShaderMaterial({
-      vertexShader: `
-        uniform float uTime;
-        uniform float uBass;
-        uniform float uTreble;
-        uniform float uTransient;
-        uniform float uBeat;
-        varying float vTwinkle;
-        varying float vAlpha;
-
-        void main() {
-          vec3 p = position;
-          float side = sign(position.x);
-          p.x += side * (uBass * 0.06 + uTransient * 0.18);
-          p.y += sin(uTime * 0.35 + position.x * 1.0) * 0.08 + uTransient * 0.08;
-          p.z += cos(uTime * 0.28 + position.y * 1.0) * 0.06;
-          vTwinkle = sin(uTime * 10.0 + position.x * 4.5) * uTreble;
-          float proximity = 1.0 - clamp((abs(position.x) - 2.3) / 2.8, 0.0, 1.0);
-          vAlpha = 0.55 + proximity * 0.35;
-          vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
-          float pSize = (1.6 + uTransient * 0.6 + uTreble * 0.5) * (280.0 / -mvPosition.z);
-          gl_PointSize = clamp(pSize, 1.0, 3.5);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        varying float vTwinkle;
-        varying float vAlpha;
-        uniform float uTransient;
-        void main() {
-          vec2 coord = gl_PointCoord - vec2(0.5);
-          float dist = length(coord);
-          if (dist > 0.5) discard;
-          float twinkle = 0.80 + 0.30 * vTwinkle;
-          float alpha = smoothstep(0.5, 0.12, dist) * vAlpha * twinkle;
-          vec3 sparkCol = vec3(1.0, 0.72, 0.08);
-          gl_FragColor = vec4(sparkCol * (1.0 + uTransient * 0.6), alpha);
-        }
-      `,
+      vertexShader: sparkVertexShader,
+      fragmentShader: sparkFragmentShader,
       uniforms: {
         uTime:      { value: 0.0 },
         uBass:      { value: 0.0 },
         uTreble:    { value: 0.0 },
         uTransient: { value: 0.0 },
-        uBeat:      { value: 0.0 },
       },
       transparent: true,
       blending: THREE.AdditiveBlending,
@@ -384,7 +403,8 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     const sparkPoints = new THREE.Points(sparkGeo, sparkMaterial);
     scene.add(sparkPoints);
 
-    const floorGeo = new THREE.PlaneGeometry(50, 50);
+    // Grounded floor with golden reflection beneath the orb
+    const floorGeo = new THREE.PlaneGeometry(60, 60);
     const floorMaterial = new THREE.ShaderMaterial({
       vertexShader: floorVertexShader,
       fragmentShader: fsFloorWithNoise,
@@ -399,52 +419,8 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
 
     const floorMesh = new THREE.Mesh(floorGeo, floorMaterial);
     floorMesh.rotation.x = -Math.PI / 2;
-    floorMesh.position.y = -2.30;
+    floorMesh.position.y = -2.85;
     scene.add(floorMesh);
-
-    const pillarMat = new THREE.MeshBasicMaterial({ color: 0x050709 });
-    [-8.0, -5.5, 5.5, 8.0].forEach((px) => {
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.25, 12, 0.25), pillarMat);
-      pillar.position.set(px, 1.5, -6.0);
-      scene.add(pillar);
-    });
-
-    const wallMat = new THREE.MeshBasicMaterial({ color: 0x030507 });
-    const wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(45, 18), wallMat);
-    wallMesh.position.set(0, 2.5, -6.5);
-    scene.add(wallMesh);
-
-    const trussMat = new THREE.MeshBasicMaterial({ color: 0x0a0f16 });
-    const trussBar = new THREE.Mesh(new THREE.BoxGeometry(22, 0.06, 0.10), trussMat);
-    trussBar.position.set(0, 4.8, -4.5);
-    scene.add(trussBar);
-
-    // 5 warm tungsten spots (small, not dominant)
-    const spotCoords: [number, number, number][] = [
-      [-5.2, 5.0, -4.5],
-      [-2.8, 4.9, -4.3],
-      [ 0.0, 4.8, -4.2],
-      [ 2.8, 4.9, -4.3],
-      [ 5.2, 5.0, -4.5],
-    ];
-
-    const spotGeo = new THREE.BufferGeometry();
-    const spotPos = new Float32Array(spotCoords.length * 3);
-    spotCoords.forEach(([x, y, z], idx) => {
-      spotPos[idx * 3]     = x;
-      spotPos[idx * 3 + 1] = y;
-      spotPos[idx * 3 + 2] = z;
-    });
-    spotGeo.setAttribute("position", new THREE.BufferAttribute(spotPos, 3));
-
-    const spotMat = new THREE.ShaderMaterial({
-      vertexShader: spotLensVertexShader,
-      fragmentShader: spotLensFragmentShader,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    scene.add(new THREE.Points(spotGeo, spotMat));
 
     threeRef.current = { renderer, scene, camera, orbPoints, orbMaterial, sparkMaterial, floorMaterial };
 
@@ -456,8 +432,6 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
       orbGeometry.dispose(); orbMaterial.dispose();
       sparkGeo.dispose(); sparkMaterial.dispose();
       floorGeo.dispose(); floorMaterial.dispose();
-      trussMat.dispose(); pillarMat.dispose(); wallMat.dispose();
-      spotGeo.dispose(); spotMat.dispose();
     };
   }, [width, height, handle]);
 
@@ -507,21 +481,21 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     sparkMaterial.uniforms.uBass.value      = bass;
     sparkMaterial.uniforms.uTreble.value    = treble;
     sparkMaterial.uniforms.uTransient.value = transientImpulse;
-    sparkMaterial.uniforms.uBeat.value      = beatImpulse;
 
     floorMaterial.uniforms.uBass.value      = bass;
     floorMaterial.uniforms.uBeat.value      = beatImpulse;
     floorMaterial.uniforms.uTransient.value = transientImpulse;
 
-    orbPoints.rotation.y = timeSeconds * 0.10;
-    orbPoints.rotation.x = Math.sin(timeSeconds * 0.05) * 0.035;
+    // Organic continuous rotation
+    orbPoints.rotation.y = timeSeconds * 0.08;
+    orbPoints.rotation.x = Math.sin(timeSeconds * 0.04) * 0.03;
 
-    // Minimal bass breathing — no kick shaking
-    const scale = 1.0 + bass * 0.028;
+    // Subtle breathing on scale
+    const scale = 1.0 + bass * 0.04;
     orbPoints.scale.set(scale, scale, scale);
 
-    // Static cinematic camera
-    camera.position.set(0, 0.20, 13.5);
+    // Static widescreen camera
+    camera.position.set(0, 0.25, 12.8);
 
     renderer.render(scene, camera);
   }

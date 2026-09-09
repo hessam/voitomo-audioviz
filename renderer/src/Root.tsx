@@ -24,7 +24,7 @@ const defaultEmptyManifest: any = {
     parameters: {},
   },
   video: {
-    width: 1080,
+    width: 1920,
     height: 1080,
     fpsNumerator: 30,
     fpsDenominator: 1,
@@ -53,7 +53,7 @@ export const RemotionRoot: React.FC = () => (
       component={AudiovizRuntime as any}
       durationInFrames={300}
       fps={30}
-      width={1080}
+      width={1920}
       height={1080}
       defaultProps={{
         manifest: defaultEmptyManifest,

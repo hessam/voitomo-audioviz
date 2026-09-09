@@ -16,11 +16,13 @@ OPENROUTER_API_KEY = os.environ.get(
 )
 LLM_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
 
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+
 def get_model():
     global _model
     if _model is None:
-        logger.info("⚡ Loading faster-whisper large-v3-turbo (compute_type=int8)...")
-        _model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+        logger.info(f"⚡ Loading faster-whisper {WHISPER_MODEL} (compute_type=int8)...")
+        _model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
     return _model
 
 def normalize_words_with_llm(words: list) -> list:

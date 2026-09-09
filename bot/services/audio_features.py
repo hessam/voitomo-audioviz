@@ -54,16 +54,21 @@ def extract_multiband_features_ffmpeg(
     fps: int = 30,
     total_frames: int = 300,
     vocal_path: Optional[str] = None,
+    bass_path: Optional[str] = None,
+    drums_path: Optional[str] = None,
+    other_path: Optional[str] = None,
+    dna_data: Optional[Dict[str, Any]] = None,
 ) -> AudioMultibandFeatures:
     """
     Extracts deterministic 30 FPS normalized [0.0, 1.0] multiband frequency features:
-    - Bass: 20Hz - 250Hz (kick, sub-bass, 808)
-    - Mids: 250Hz - 4000Hz (vocals, melodies, snare punch)
-    - Treble: 4000Hz - 16000Hz (hi-hats, cymbals, air)
+    - Bass: isolated bass stem or 20Hz - 250Hz lowpass filter
+    - Mids: 250Hz - 4000Hz (harmonic melodies, instruments)
+    - Treble: isolated other/highs or 4000Hz - 16000Hz (sparkles, shimmer)
     - Transients: frame indices with sharp onset peaks
     - Vocal Energy: isolated vocal envelope [0.0, 1.0]
+    - Drums Energy: isolated drums envelope or percussion transient envelope [0.0, 1.0]
     - Macro Energy: overall track dynamic range [0.0, 1.0]
-    - Rhythm Grid: BPM, beat frames, and downbeat frames
+    - Rhythm Grid: BPM, beat frames, downbeat frames, and harmonic key from Music DNA
     """
     def get_band_rms(target_path: str, filter_str: str) -> List[float]:
         try:
@@ -110,10 +115,23 @@ def extract_multiband_features_ffmpeg(
             logger.warning(f"Error extracting band RMS ({filter_str}): {e}")
             return [0.0] * total_frames
 
-    # Extract 3 frequency bands
-    bass_raw = get_band_rms(audio_path, "lowpass=f=250,acompressor=threshold=-18dB:ratio=3")
+    # Extract Bass: isolated bass stem if available, else lowpass master
+    bass_target = bass_path if (bass_path and os.path.exists(bass_path)) else audio_path
+    bass_filter = "volume=1.0" if (bass_path and os.path.exists(bass_path)) else "lowpass=f=250,acompressor=threshold=-18dB:ratio=3"
+    bass_raw = get_band_rms(bass_target, bass_filter)
+
+    # Extract Mids
     mids_raw = get_band_rms(audio_path, "highpass=f=250,lowpass=f=4000")
-    treble_raw = get_band_rms(audio_path, "highpass=f=4000,lowpass=f=16000")
+
+    # Extract Treble / Shimmer
+    treble_target = other_path if (other_path and os.path.exists(other_path)) else audio_path
+    treble_filter = "highpass=f=4000,lowpass=f=16000"
+    treble_raw = get_band_rms(treble_target, treble_filter)
+
+    # Isolated Drums Energy: drums stem if available, else transient-focused percussion band
+    drums_target = drums_path if (drums_path and os.path.exists(drums_path)) else audio_path
+    drums_filter = "volume=1.0" if (drums_path and os.path.exists(drums_path)) else "highpass=f=60,lowpass=f=8000,acompressor=threshold=-16dB:ratio=4"
+    drums_raw = get_band_rms(drums_target, drums_filter)
 
     # Macro overall track energy
     macro_raw = get_band_rms(audio_path, "volume=1.0")
@@ -136,19 +154,28 @@ def extract_multiband_features_ffmpeg(
     mids_curve = smooth(mids_raw, alpha=0.35)
     treble_curve = smooth(treble_raw, alpha=0.30)
     vocal_curve = smooth(vocal_raw, alpha=0.40)
+    drums_curve = smooth(drums_raw, alpha=0.50)
     macro_curve = smooth(macro_raw, alpha=0.25)
 
     # Detect transient drops/kicks
     transients: List[int] = []
-    for i in range(1, len(bass_raw) - 1):
-        if bass_raw[i] > 0.50 and bass_raw[i] > bass_raw[i - 1] and bass_raw[i] >= bass_raw[i + 1]:
+    transient_source = drums_raw if drums_path else bass_raw
+    for i in range(1, len(transient_source) - 1):
+        if transient_source[i] > 0.45 and transient_source[i] > transient_source[i - 1] and transient_source[i] >= transient_source[i + 1]:
             transients.append(i)
 
-    # Extract rhythm and beat grid via AudioIntelligenceAdapter
-    rhythm = AudioIntelligenceAdapter.extract_rhythm_and_beats(audio_path, fps=fps)
-    bpm = rhythm.get("bpm", 120.0)
-    beat_frames = [f for f in rhythm.get("beat_frames", []) if f < total_frames]
-    downbeat_frames = [f for f in rhythm.get("downbeat_frames", []) if f < total_frames]
+    # Rhythm & Musical Key: Use Music DNA if available, else local adapter fallback
+    if dna_data and isinstance(dna_data, dict) and dna_data.get("bpm"):
+        bpm = float(dna_data.get("bpm", 120.0))
+        beat_frames = [f for f in dna_data.get("beat_frames", []) if f < total_frames]
+        downbeat_frames = [f for f in dna_data.get("downbeat_frames", []) if f < total_frames]
+        musical_key = dna_data.get("musical_key", "C Major")
+    else:
+        rhythm = AudioIntelligenceAdapter.extract_rhythm_and_beats(audio_path, fps=fps)
+        bpm = rhythm.get("bpm", 120.0)
+        beat_frames = [f for f in rhythm.get("beat_frames", []) if f < total_frames]
+        downbeat_frames = [f for f in rhythm.get("downbeat_frames", []) if f < total_frames]
+        musical_key = "C Major"
 
     return AudioMultibandFeatures(
         bass=bass_curve,
@@ -159,8 +186,9 @@ def extract_multiband_features_ffmpeg(
         beatFrames=beat_frames,
         downbeatFrames=downbeat_frames,
         vocalEnergy=vocal_curve,
+        drumsEnergy=drums_curve,
         macroEnergy=macro_curve,
-        musicalKey="C Major",
+        musicalKey=musical_key,
     )
 
 
@@ -194,17 +222,37 @@ class AudioFeatureExtractor:
         # 1. Attempt stem extraction via Audio Intelligence Adapter
         vocal_stem_path: Optional[str] = None
         bass_stem_path: Optional[str] = None
-        try:
-            vocal_stem_path = await AudioIntelligenceAdapter.separate_vocals(audio_path)
-        except Exception as e:
-            logger.info(f"Vocal stem separation skipped: {e}")
+        drums_stem_path: Optional[str] = None
+        other_stem_path: Optional[str] = None
+        dna_data: Optional[Dict[str, Any]] = None
 
-        # 2. Extract deterministic multiband 30 FPS features with stem & rhythm awareness
+        try:
+            stems = await AudioIntelligenceAdapter.separate_stems_broker(audio_path)
+            vocal_stem_path = stems.get("vocals")
+            bass_stem_path = stems.get("bass")
+            drums_stem_path = stems.get("drums")
+            other_stem_path = stems.get("other") or stems.get("instrumental")
+            if not vocal_stem_path:
+                vocal_stem_path = await AudioIntelligenceAdapter.separate_vocals(audio_path)
+        except Exception as e:
+            logger.info(f"Stem separation skipped: {e}")
+
+        # 2. Attempt Music DNA extraction via Audio Intelligence Adapter
+        try:
+            dna_data = await AudioIntelligenceAdapter.extract_music_dna_broker(audio_path)
+        except Exception as e:
+            logger.info(f"Music DNA extraction skipped: {e}")
+
+        # 3. Extract deterministic multiband 30 FPS features with stem & rhythm awareness
         features = extract_multiband_features_ffmpeg(
             audio_path=audio_path,
             fps=fps,
             total_frames=total_frames,
             vocal_path=vocal_stem_path,
+            bass_path=bass_stem_path,
+            drums_path=drums_stem_path,
+            other_path=other_stem_path,
+            dna_data=dna_data,
         )
 
         # 3. Format Whisper words into 30 FPS clamped LyricLines

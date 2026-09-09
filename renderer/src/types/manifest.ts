@@ -24,6 +24,8 @@ export interface AudioMultibandFeatures {
   downbeatFrames?: number[];
   /** 30 FPS isolated vocal envelope */
   vocalEnergy?: number[];
+  /** 30 FPS isolated drums envelope */
+  drumsEnergy?: number[];
   /** 30 FPS structural build-up/drop curve */
   macroEnergy?: number[];
   /** Harmonic key tonality (e.g. "D Minor") */

@@ -9,10 +9,12 @@ from typing import Dict, Any, List, Optional
 import math
 import struct
 
+import shutil
+import uuid
+
 logger = logging.getLogger(__name__)
 
-AUDIO_ENGINEER_URL = os.environ.get("AUDIO_ENGINEER_URL", "http://hermes-audio-engineer-sandbox:5001")
-MUSIC_DNA_URL = os.environ.get("MUSIC_DNA_URL", "http://hermes-music-dna-sandbox:5002")
+AUDIOVIZ_BROKER_DIR = os.environ.get("AUDIOVIZ_BROKER_DIR", "/workspace/audioviz-broker")
 
 @dataclass
 class AudioAnchor:
@@ -30,41 +32,175 @@ class AudioIntelligenceAdapter:
     """
     Non-invasive adapter orchestrating specialized intelligence from:
     1. hermes-audio-engineer: Mel-Band RoFormer stem separation for dry vocals
-    2. hermes-music-dna: Rhythm grid, BPM, downbeats, and energy curves
+    2. hermes-music-dna: Rhythm grid, BPM, downbeats, and musical key
     Includes robust local DSP fallbacks to ensure 100% service uptime.
     """
 
     @staticmethod
-    async def separate_vocals(audio_path: str, timeout_seconds: int = 45) -> str:
+    async def separate_stems_broker(audio_path: str, timeout_seconds: int = 90) -> Dict[str, str]:
         """
-        Extracts dry vocal stem from a song.
-        Uses Audio Engineer agent if available; falls back to spectral center-channel isolation.
+        Delegates stem separation to hermes-audio-engineer via Host Exec Broker.
+        Returns dict with paths to 'vocals', 'instrumental' (or 'bass'/'drums' if present).
+        Falls back gracefully if broker is offline or timed out.
         """
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Input audio file not found: {audio_path}")
 
-        # 1. Attempt delegated extraction via Audio Engineer Agent microservice
+        job_id = f"stems_{uuid.uuid4().hex[:10]}"
+        job_dir = os.path.join(AUDIOVIZ_BROKER_DIR, "jobs", job_id)
+        
+        # Check if broker directory exists
+        if not os.path.exists(AUDIOVIZ_BROKER_DIR):
+            logger.info(f"Broker dir {AUDIOVIZ_BROKER_DIR} not mounted, using local fallback.")
+            return {}
+
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{AUDIO_ENGINEER_URL}/separate",
-                    json={"audio_path": audio_path, "target_stem": "vocals"},
-                    timeout=aiohttp.ClientTimeout(total=timeout_seconds)
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        vocal_path = data.get("vocal_path")
-                        if vocal_path and os.path.exists(vocal_path):
-                            logger.info(f"🎙 Isolated dry vocals via Audio Engineer Agent: {vocal_path}")
-                            return vocal_path
+            os.makedirs(job_dir, exist_ok=True)
+            input_dest = os.path.join(job_dir, "input.wav")
+            shutil.copy2(audio_path, input_dest)
+
+            trigger_payload = {
+                "job_id": job_id,
+                "action": "separate_stems",
+                "audio_filename": "input.wav"
+            }
+            with open(os.path.join(job_dir, "trigger.json"), "w") as f:
+                json.dump(trigger_payload, f)
+
+            logger.info(f"🚀 Sent stem separation job {job_id} to host broker...")
+            result_file = os.path.join(job_dir, "result.json")
+            output_dir = os.path.join(job_dir, "output")
+
+            start_time = asyncio.get_event_loop().time()
+            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+                if os.path.exists(result_file):
+                    break
+                await asyncio.sleep(0.5)
+
+            if not os.path.exists(result_file):
+                logger.warning(f"Stem separation job {job_id} timed out after {timeout_seconds}s.")
+                return {}
+
+            with open(result_file, "r") as f:
+                res_data = json.load(f)
+
+            if res_data.get("status") != "success":
+                logger.warning(f"Stem separation job {job_id} failed: {res_data.get('error')}")
+                return {}
+
+            stems: Dict[str, str] = {}
+            if os.path.exists(output_dir):
+                # Copy isolated stems to persistent safe cache dir
+                cache_dir = tempfile.mkdtemp(prefix=f"audioviz_stems_{job_id}_")
+                for fname in os.listdir(output_dir):
+                    fpath = os.path.join(output_dir, fname)
+                    dest_path = os.path.join(cache_dir, fname)
+                    shutil.copy2(fpath, dest_path)
+                    lower_name = fname.lower()
+                    if "vocal" in lower_name:
+                        stems["vocals"] = dest_path
+                    elif "instrumental" in lower_name or "no_vocals" in lower_name:
+                        stems["instrumental"] = dest_path
+                    elif "bass" in lower_name:
+                        stems["bass"] = dest_path
+                    elif "drum" in lower_name:
+                        stems["drums"] = dest_path
+                    elif "other" in lower_name:
+                        stems["other"] = dest_path
+
+            logger.info(f"✨ Stem separation completed successfully: {list(stems.keys())}")
+            return stems
+
         except Exception as e:
-            logger.info(f"Audio Engineer delegation bypassed/offline ({e}), using local acoustic vocal extraction.")
+            logger.warning(f"Broker stem separation error: {e}")
+            return {}
+        finally:
+            try:
+                if os.path.exists(job_dir):
+                    shutil.rmtree(job_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    @staticmethod
+    async def extract_music_dna_broker(audio_path: str, timeout_seconds: int = 30) -> Dict[str, Any]:
+        """
+        Delegates groove, BPM, beat grid, and musical key extraction to hermes-music-dna via Broker.
+        Falls back gracefully to local librosa extraction.
+        """
+        if not os.path.exists(audio_path):
+            return {}
+
+        job_id = f"dna_{uuid.uuid4().hex[:10]}"
+        job_dir = os.path.join(AUDIOVIZ_BROKER_DIR, "jobs", job_id)
+
+        if not os.path.exists(AUDIOVIZ_BROKER_DIR):
+            return {}
+
+        try:
+            os.makedirs(job_dir, exist_ok=True)
+            input_dest = os.path.join(job_dir, "input.wav")
+            shutil.copy2(audio_path, input_dest)
+
+            trigger_payload = {
+                "job_id": job_id,
+                "action": "music_dna",
+                "audio_filename": "input.wav"
+            }
+            with open(os.path.join(job_dir, "trigger.json"), "w") as f:
+                json.dump(trigger_payload, f)
+
+            logger.info(f"🎵 Sent music DNA job {job_id} to host broker...")
+            result_file = os.path.join(job_dir, "result.json")
+            output_dna = os.path.join(job_dir, "output", "dna.json")
+
+            start_time = asyncio.get_event_loop().time()
+            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+                if os.path.exists(result_file):
+                    break
+                await asyncio.sleep(0.5)
+
+            if not os.path.exists(result_file):
+                logger.warning(f"Music DNA job {job_id} timed out after {timeout_seconds}s.")
+                return {}
+
+            if os.path.exists(output_dna):
+                with open(output_dna, "r") as f:
+                    dna_json = json.load(f)
+                logger.info(f"🎶 Music DNA extracted: BPM={dna_json.get('bpm')}, Key={dna_json.get('musical_key')}")
+                return dna_json
+
+            return {}
+        except Exception as e:
+            logger.warning(f"Broker music DNA error: {e}")
+            return {}
+        finally:
+            try:
+                if os.path.exists(job_dir):
+                    shutil.rmtree(job_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    @staticmethod
+    async def separate_vocals(audio_path: str, timeout_seconds: int = 90) -> str:
+        """
+        Extracts dry vocal stem from a song.
+        Uses Mel-Band RoFormer via Broker; falls back to spectral center-channel isolation.
+        """
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Input audio file not found: {audio_path}")
+
+        # 1. Attempt broker stem separation
+        try:
+            stems = await AudioIntelligenceAdapter.separate_stems_broker(audio_path, timeout_seconds=timeout_seconds)
+            if stems.get("vocals") and os.path.exists(stems["vocals"]):
+                logger.info(f"🎙 Isolated dry vocals via Mel-Band RoFormer: {stems['vocals']}")
+                return stems["vocals"]
+        except Exception as e:
+            logger.info(f"Broker stem separation bypassed ({e}), using local acoustic vocal extraction.")
 
         # 2. Resilient local fallback: Bandpass vocal formant extraction via FFmpeg
         out_vocal = tempfile.NamedTemporaryFile(suffix="_vocals.wav", delete=False).name
         try:
-            # Bandpass filter tuned to vocal fundamental & formants (200Hz - 4500Hz) with voice compression
             cmd = [
                 "ffmpeg", "-y", "-i", audio_path,
                 "-af", "highpass=f=180,lowpass=f=4500,acompressor=threshold=-18dB:ratio=4:attack=15:release=100",

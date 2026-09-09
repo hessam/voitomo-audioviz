@@ -18,6 +18,7 @@ class AudioMultibandFeatures:
     beatFrames: List[int] = field(default_factory=list)  # Exact frame indices of quarter-note beats
     downbeatFrames: List[int] = field(default_factory=list)  # 1st-beat-of-bar downbeats
     vocalEnergy: List[float] = field(default_factory=list)  # 30 FPS isolated vocal envelope
+    drumsEnergy: List[float] = field(default_factory=list)  # 30 FPS isolated drums envelope
     macroEnergy: List[float] = field(default_factory=list)  # 30 FPS structural build-up/drop curve
     musicalKey: str = ""  # Harmonic key tonality (e.g. "D Minor")
 

@@ -16,7 +16,7 @@ OPENROUTER_API_KEY = os.environ.get(
 )
 LLM_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
 
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "medium")
 
 def get_model():
     global _model

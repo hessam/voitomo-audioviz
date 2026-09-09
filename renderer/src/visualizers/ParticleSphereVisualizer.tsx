@@ -58,6 +58,7 @@ uniform float uBass;
 uniform float uMids;
 uniform float uTreble;
 uniform float uVocal;
+uniform float uDrums;
 uniform float uTransient;
 uniform float uBeat;
 
@@ -77,8 +78,8 @@ void main() {
 
   vec3 n = normalize(position);
 
-  // Time & stem flow dynamics
-  float flowTime = uTime * 0.22 + uVocal * 1.20 + uMids * 0.80;
+  // Time & stem flow dynamics: vocal stem drives fluid speed acceleration
+  float flowTime = uTime * 0.22 + uVocal * 1.60 + uMids * 0.40;
 
   // 1. Multi-octave 3D Simplex noise folds the surface into smooth undulating organic lobes
   // Large scale: broad, majestic rolling lobes that bulge outward and fold inward
@@ -96,11 +97,13 @@ void main() {
   // Base structural organic displacement (harmonious rolling lobes)
   float baseDisp = nLobe * 0.58 + nFold * 0.22 + nRipple * 0.06;
 
-  // High-amplitude audio dynamics:
-  // Bass drops and transients trigger dynamic morphing shape warps and shockwaves
-  float bassWarp = nLobe * (uBass * 0.80 + uTransient * 0.55);
-  float midsWarp = nFold * (uMids * 0.40 + uVocal * 0.30);
-  float shockwave = sin(length(position) * 3.2 - uTime * 5.5) * (uBeat * 0.18 + uTransient * 0.22);
+  // Stem-isolated dynamics:
+  // Bass drives macro lobe expansion exclusively
+  float bassWarp = nLobe * (uBass * 1.15);
+  // Mids drive secondary undulating folds
+  float midsWarp = nFold * (uMids * 0.45);
+  // Drums & transients drive the sharp outward propagating shockwave ring exclusively
+  float shockwave = sin(length(position) * 3.4 - uTime * 5.8) * (uDrums * 0.35 + uTransient * 0.28 + uBeat * 0.16);
 
   float totalDisp = baseDisp + bassWarp + midsWarp + shockwave;
   vDisp = totalDisp;
@@ -350,6 +353,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
         uBass:      { value: 0.0 },
         uMids:      { value: 0.0 },
         uVocal:     { value: 0.0 },
+        uDrums:     { value: 0.0 },
         uTreble:    { value: 0.0 },
         uTransient: { value: 0.0 },
         uBeat:      { value: 0.0 },
@@ -438,6 +442,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
   const timeSeconds = frame / fps;
   const bass  = (features?.bass?.[frame] ?? 0.0) * intensity;
   const vocal   = features?.vocalEnergy?.[frame] ?? 0.0;
+  const drums   = (features?.drumsEnergy?.[frame] ?? Math.max(bass * 0.75, features?.transients?.includes(frame) ? 1.0 : 0.0)) * intensity;
   const rawMids = features?.mids?.[frame] ?? 0.0;
   const mids    = (rawMids * 0.6 + vocal * 0.4) * intensity;
   const treble  = (features?.treble?.[frame] ?? 0.0) * intensity;
@@ -473,6 +478,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     orbMaterial.uniforms.uBass.value      = bass;
     orbMaterial.uniforms.uMids.value      = mids;
     orbMaterial.uniforms.uVocal.value     = vocal;
+    orbMaterial.uniforms.uDrums.value     = drums;
     orbMaterial.uniforms.uTreble.value    = treble;
     orbMaterial.uniforms.uTransient.value = transientImpulse;
     orbMaterial.uniforms.uBeat.value      = beatImpulse;

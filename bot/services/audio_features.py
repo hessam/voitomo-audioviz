@@ -262,6 +262,17 @@ class AudioFeatureExtractor:
         )
 
         # 3. Format Whisper words into 30 FPS clamped LyricLines
+        # If words is empty or missing, run lyric transcription on isolated vocal stem
+        if (not words or len(words) == 0) and vocal_stem_path and os.path.exists(vocal_stem_path):
+            try:
+                from bot.services.lyric_transcriber import transcribe_lyrics
+                logger.info(f"🎙 Running singing transcription on isolated vocal stem: {vocal_stem_path}")
+                lyric_res = await asyncio.to_thread(transcribe_lyrics, vocal_stem_path)
+                words = lyric_res.get("words", [])
+                logger.info(f"✅ Extracted {len(words)} lyric words from vocal stem")
+            except Exception as e:
+                logger.info(f"Fallback vocal lyric transcription skipped: {e}")
+
         lyric_lines: List[LyricLine] = []
         if words and isinstance(words, list):
             # Group words into clean sequential lines (3 to 6 words per line)

@@ -13,7 +13,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from bot.services.audio_features import AudioFeatureExtractor, compute_sha256
-from bot.services.transcriber import transcribe
+from bot.services.audio_adapter import AudioIntelligenceAdapter
+from bot.services.lyric_transcriber import transcribe_lyrics
 
 logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
@@ -67,17 +68,30 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
 
     await bot.download_file(file_info.file_path, local_path)
 
-    # Fast transcription for synchronized lyrics
+    # 1. Isolate vocals first (Voitomo pipeline) to prevent music from contaminating ASR
+    await status_msg.edit_text("🎙 Isolating vocals via stem separator...")
+    vocal_path = None
+    try:
+        vocal_path = await AudioIntelligenceAdapter.separate_vocals(local_path)
+    except Exception as e:
+        logger.info(f"Pre-vocal separation skipped/fallback: {e}")
+
+    # 2. Singing-voice lyric transcription on isolated vocals (or master fallback)
     await status_msg.edit_text("🔍 Extracting vocal lyrics via Whisper...")
     words = []
+    transcribe_target = vocal_path if vocal_path and os.path.exists(vocal_path) else local_path
     try:
-        res = await asyncio.to_thread(transcribe, local_path)
+        res = await asyncio.to_thread(transcribe_lyrics, transcribe_target)
         words = res.get("words", [])
+        if not words and transcribe_target != local_path:
+            res_fb = await asyncio.to_thread(transcribe_lyrics, local_path)
+            words = res_fb.get("words", [])
     except Exception as e:
         logger.info(f"Vocal transcription skipped or unavailable: {e}")
 
     _AUDIO_CACHE[job_id] = {
         "audio_path": local_path,
+        "vocal_path": vocal_path,
         "words": words,
     }
 

@@ -40,12 +40,12 @@ def clean_lyric_token(text: str) -> str:
     t = re.sub(r"[،,.\-_!?؟\s]+$", "", t)
     return t.strip()
 
-def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None) -> Dict[str, Any]:
+def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None, language: Optional[str] = None) -> Dict[str, Any]:
     """
-    Singing-Voice Persian Transcription Engine:
+    Singing-Voice Persian/English Transcription Engine:
     1. Suppresses non-speech [music] hallucinations.
     2. Uses condition_on_previous_text=False to prevent repetitive cascades.
-    3. Primes ASR with poetic Persian lyrical meter.
+    3. Primes ASR with poetic lyrical meter.
     4. If user provides verified lyrics, aligns them with acoustic timestamps.
     """
     # 1. Convert to 16kHz mono WAV
@@ -60,16 +60,24 @@ def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None) 
     try:
         model = get_whisper_model()
         
+        prompt = (
+            "متن ترانه، شعر فارسی، کلمات آواز و موسیقی روان و بدون غلط."
+            if language == "fa"
+            else "Song lyrics, clean vocal words, singing transcript without errors."
+            if language == "en"
+            else "متن ترانه، شعر فارسی و انگلیسی، کلمات آواز و موسیقی روان."
+        )
+
         # We disable condition_on_previous_text so singing pauses do not loop hallucinations
         segments, info = model.transcribe(
             wav_path,
-            language="fa",
+            language=language,
             task="transcribe",
             beam_size=5,
             word_timestamps=True,
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=400),
-            initial_prompt="متن ترانه، شعر فارسی، کلمات آواز و موسیقی روان و بدون غلط.",
+            vad_parameters=dict(min_silence_duration_ms=600, speech_pad_ms=300),
+            initial_prompt=prompt,
             condition_on_previous_text=False,
             prepend_punctuations="«\"'([{-",
             append_punctuations="»\"'.)،!؟:;]}"

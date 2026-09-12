@@ -49,14 +49,44 @@ async function ensureBundle() {
   return bundlePromise;
 }
 
+interface JobState {
+  id: string;
+  status: "queued" | "rendering" | "done" | "error";
+  renderedFrames: number;
+  totalFrames: number;
+  percent: number;
+  startedAt: number;
+  etaSeconds: number;
+  path?: string;
+  error?: string;
+}
+
+const jobs = new Map<string, JobState>();
+
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const [id, job] of jobs.entries()) {
+      if (job.startedAt < cutoff) jobs.delete(id);
+    }
+  }, 60 * 60 * 1000);
+}
+
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", bundled: serveUrl !== null });
 });
-app.post("/render", async (req, res) => {
-  const { manifest, scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = req.body || {};
+
+app.get("/render/jobs/:id", (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  res.json(job);
+});
+
+async function runRenderJob(jobId: string, body: any): Promise<string> {
+  const { manifest, scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = body || {};
 
   if (!manifest && !creativeSpec && (!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
-    return res.status(400).json({ error: "manifest, creativeSpec, words, or scenes array required" });
+    throw new RenderInputError("manifest, creativeSpec, words, or scenes array required");
   }
 
   let cleanupAudio: (() => Promise<void>) | undefined;
@@ -116,6 +146,14 @@ app.post("/render", async (req, res) => {
     });
 
     const outPath = path.join(OUT_DIR, `render-${randomUUID()}.mp4`);
+    const totalFrames = renderDuration || composition.durationInFrames;
+
+    const job = jobs.get(jobId);
+    if (job) {
+      job.status = "rendering";
+      job.totalFrames = totalFrames;
+      job.startedAt = Date.now();
+    }
 
     await renderMedia({
       composition: {
@@ -136,10 +174,19 @@ app.post("/render", async (req, res) => {
       inputProps,
       concurrency: 2,
       onProgress: ({ renderedFrames }) => {
-        const total = renderDuration || composition.durationInFrames;
-        const pct = Math.round((renderedFrames / total) * 100);
-        if (renderedFrames % 100 === 0 || renderedFrames === total) {
-          console.log(`🎬 Render Progress: ${pct}% (${renderedFrames}/${total} frames)`);
+        const pct = Math.min(100, Math.round((renderedFrames / totalFrames) * 100));
+        const currentJob = jobs.get(jobId);
+        if (currentJob) {
+          const elapsedSec = (Date.now() - currentJob.startedAt) / 1000;
+          const fps = renderedFrames / Math.max(0.1, elapsedSec);
+          const remainingFrames = Math.max(0, totalFrames - renderedFrames);
+          const etaSeconds = Math.round(remainingFrames / Math.max(0.1, fps));
+          currentJob.renderedFrames = renderedFrames;
+          currentJob.percent = pct;
+          currentJob.etaSeconds = etaSeconds;
+        }
+        if (renderedFrames % 100 === 0 || renderedFrames === totalFrames) {
+          console.log(`🎬 Render Progress [${jobId}]: ${pct}% (${renderedFrames}/${totalFrames} frames)`);
         }
       },
       chromiumOptions: {
@@ -151,14 +198,54 @@ app.post("/render", async (req, res) => {
       timeoutInMilliseconds: Math.max(7200000, renderDuration * 2500),
     });
 
-    console.log(`✅ Rendered: ${outPath}`);
-    res.json({ path: outPath });
+    console.log(`✅ Rendered [${jobId}]: ${outPath}`);
+    if (job) {
+      job.status = "done";
+      job.percent = 100;
+      job.path = outPath;
+      job.etaSeconds = 0;
+    }
+    return outPath;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("❌ Render error:", message);
-    res.status(err instanceof RenderInputError ? 400 : 500).json({ error: message });
+    console.error(`❌ Render error [${jobId}]:`, message);
+    const job = jobs.get(jobId);
+    if (job) {
+      job.status = "error";
+      job.error = message;
+    }
+    throw err;
   } finally {
     if (cleanupAudio) await cleanupAudio().catch((error) => console.warn("Audio cleanup failed:", error));
+  }
+}
+
+app.post("/render", async (req, res) => {
+  const isAsync = req.body?.async === true;
+  const jobId = req.body?.jobId || randomUUID();
+
+  jobs.set(jobId, {
+    id: jobId,
+    status: "queued",
+    renderedFrames: 0,
+    totalFrames: req.body?.manifest?.video?.frameCount || req.body?.durationInFrames || 300,
+    percent: 0,
+    startedAt: Date.now(),
+    etaSeconds: 0,
+  });
+
+  if (isAsync) {
+    // Return job identifier immediately for progress polling
+    runRenderJob(jobId, req.body).catch(() => {});
+    return res.json({ jobId, status: "queued" });
+  }
+
+  try {
+    const outPath = await runRenderJob(jobId, req.body);
+    res.json({ path: outPath, jobId });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(err instanceof RenderInputError ? 400 : 500).json({ error: message });
   }
 });
 

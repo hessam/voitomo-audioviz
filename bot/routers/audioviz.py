@@ -4,6 +4,7 @@ import json
 import logging
 import aiohttp
 import asyncio
+import time
 from typing import Dict, Any
 
 from aiogram import Router, F, Bot
@@ -128,19 +129,68 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
 
         manifest_dict = manifest.to_dict()
 
-        # 2. Trigger Remotion render on port 4001 with dynamic timeout for long songs
+        # 2. Trigger Remotion render on port 4001 with live progress polling
         total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
+        rendered_mp4 = None
         async with aiohttp.ClientSession() as session:
+            # Trigger render in async job mode
             async with session.post(
                 f"{RENDERER_URL}/render",
-                json={"manifest": manifest_dict},
-                timeout=aiohttp.ClientTimeout(total=total_render_timeout),
+                json={"manifest": manifest_dict, "jobId": job_id, "async": True},
+                timeout=aiohttp.ClientTimeout(total=60),
             ) as resp:
                 if resp.status != 200:
                     err_text = await resp.text()
                     raise RuntimeError(f"Render server error ({resp.status}): {err_text}")
-                result = await resp.json()
-                rendered_mp4 = result.get("path")
+
+            poll_interval = 4.0
+            last_edit_ts = 0.0
+            last_pct = -1
+            poll_deadline = time.time() + total_render_timeout
+
+            while time.time() < poll_deadline:
+                await asyncio.sleep(poll_interval)
+                try:
+                    async with session.get(
+                        f"{RENDERER_URL}/render/jobs/{job_id}",
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as status_resp:
+                        if status_resp.status != 200:
+                            continue
+                        job_info = await status_resp.json()
+                        st = job_info.get("status")
+                        if st == "done":
+                            rendered_mp4 = job_info.get("path")
+                            break
+                        elif st == "error":
+                            raise RuntimeError(f"Render server error: {job_info.get('error')}")
+
+                        pct = int(job_info.get("percent", 0))
+                        frames_done = job_info.get("renderedFrames", 0)
+                        total_f = job_info.get("totalFrames", manifest.video.frameCount)
+                        eta_sec = int(job_info.get("etaSeconds", 0))
+
+                        now = time.time()
+                        if pct != last_pct and (now - last_edit_ts) >= 4.0:
+                            last_pct = pct
+                            last_edit_ts = now
+                            filled = min(10, max(0, pct // 10))
+                            bar = "█" * filled + "░" * (10 - filled)
+                            m, s = divmod(eta_sec, 60)
+                            eta_str = f"{m}m {s}s" if m > 0 else f"{s}s"
+                            if callback.message:
+                                try:
+                                    await callback.message.edit_text(
+                                        f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
+                                        f"`[{bar}]` **{pct}%**\n"
+                                        f"🎞 Frames: `{frames_done}/{total_f}`\n"
+                                        f"⏱ Est. Remaining: `{eta_str}`",
+                                        parse_mode="Markdown",
+                                    )
+                                except Exception:
+                                    pass
+                except Exception as poll_err:
+                    logger.debug(f"Progress poll notice: {poll_err}")
 
         if not rendered_mp4 or not os.path.exists(rendered_mp4):
             raise FileNotFoundError(f"Rendered video not found at: {rendered_mp4}")

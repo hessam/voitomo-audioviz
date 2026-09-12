@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "medium")
 
+_whisper_model = None
+
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:

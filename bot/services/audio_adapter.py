@@ -4,8 +4,9 @@ import json
 import logging
 import tempfile
 import asyncio
+import time
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import math
 import struct
 
@@ -15,6 +16,9 @@ import uuid
 logger = logging.getLogger(__name__)
 
 AUDIOVIZ_BROKER_DIR = os.environ.get("AUDIOVIZ_BROKER_DIR", "/workspace/audioviz-broker")
+# Filename written inside job_dir before polling starts.
+# Contains caller context so restarts can re-deliver completed jobs.
+_CLAIM_FILE = "claim.json"
 
 @dataclass
 class AudioAnchor:
@@ -37,9 +41,15 @@ class AudioIntelligenceAdapter:
     """
 
     @staticmethod
-    async def separate_stems_broker(audio_path: str, timeout_seconds: int = 90) -> Dict[str, str]:
+    async def separate_stems_broker(
+        audio_path: str,
+        timeout_seconds: int = 1800,
+        chat_id: int = 0,
+        message_id: int = 0,
+    ) -> Dict[str, str]:
         """
-        Delegates stem separation to hermes-audio-engineer via Host Exec Broker.
+        Delegates stem separation to hermes-audio-engineer-sandbox via host broker.
+        Allows full high-fidelity neural processing without artificial short timeouts.
         Returns dict with paths to 'vocals', 'instrumental' (or 'bass'/'drums' if present).
         Falls back gracefully if broker is offline or timed out.
         """
@@ -66,6 +76,20 @@ class AudioIntelligenceAdapter:
             }
             with open(os.path.join(job_dir, "trigger.json"), "w") as f:
                 json.dump(trigger_payload, f)
+
+            # --- RESURRECTION ANCHOR ---
+            # Write caller identity BEFORE we start polling.
+            # If this process is killed mid-wait, the restart scan finds this
+            # file, sees result.json exists, and re-delivers the result.
+            claim_path = os.path.join(job_dir, _CLAIM_FILE)
+            claim = {
+                "job_id": job_id,
+                "submitted_at": time.time(),
+                "chat_id": chat_id,
+                "message_id": message_id,
+            }
+            with open(claim_path, "w") as f:
+                json.dump(claim, f)
 
             logger.info(f"🚀 Sent stem separation job {job_id} to host broker...")
             result_file = os.path.join(job_dir, "result.json")
@@ -115,11 +139,101 @@ class AudioIntelligenceAdapter:
             logger.warning(f"Broker stem separation error: {e}")
             return {}
         finally:
+            # Remove claim file so resurrection scan ignores completed jobs
+            try:
+                claim_path = os.path.join(job_dir, _CLAIM_FILE)
+                if os.path.exists(claim_path):
+                    os.remove(claim_path)
+            except Exception:
+                pass
             try:
                 if os.path.exists(job_dir):
                     shutil.rmtree(job_dir, ignore_errors=True)
             except Exception:
                 pass
+
+    @staticmethod
+    def collect_orphaned_stem_jobs() -> List[Tuple[str, int, int, Dict[str, str]]]:
+        """
+        Startup resurrection scan.
+
+        Finds jobs that:
+        - Were submitted (claim.json exists with chat_id/message_id)
+        - Completed while this process was dead (result.json status=success)
+        - Output stems are still on disk
+
+        Returns list of (job_id, chat_id, message_id, stems_dict) tuples.
+        Call once at bot startup; re-deliver each to the original user.
+        """
+        results = []
+        jobs_root = os.path.join(AUDIOVIZ_BROKER_DIR, "jobs")
+        if not os.path.isdir(jobs_root):
+            return results
+
+        for job_id in os.listdir(jobs_root):
+            job_dir = os.path.join(jobs_root, job_id)
+            if not os.path.isdir(job_dir):
+                continue
+            claim_path = os.path.join(job_dir, _CLAIM_FILE)
+            result_path = os.path.join(job_dir, "result.json")
+            output_dir = os.path.join(job_dir, "output")
+
+            if not os.path.exists(claim_path) or not os.path.exists(result_path):
+                continue
+
+            try:
+                with open(claim_path) as f:
+                    claim = json.load(f)
+                with open(result_path) as f:
+                    res = json.load(f)
+            except Exception:
+                continue
+
+            if res.get("status") != "success":
+                continue
+
+            chat_id = claim.get("chat_id", 0)
+            message_id = claim.get("message_id", 0)
+            if not chat_id:
+                continue
+
+            # Collect stem file paths
+            stems: Dict[str, str] = {}
+            if os.path.isdir(output_dir):
+                try:
+                    cache_dir = tempfile.mkdtemp(prefix=f"audioviz_stems_{job_id}_")
+                    for fname in os.listdir(output_dir):
+                        fpath = os.path.join(output_dir, fname)
+                        dest = os.path.join(cache_dir, fname)
+                        shutil.copy2(fpath, dest)
+                        lname = fname.lower()
+                        if "vocal" in lname:
+                            stems["vocals"] = dest
+                        elif "instrumental" in lname or "no_vocals" in lname:
+                            stems["instrumental"] = dest
+                        elif "bass" in lname:
+                            stems["bass"] = dest
+                        elif "drum" in lname:
+                            stems["drums"] = dest
+                        elif "other" in lname:
+                            stems["other"] = dest
+                except Exception as e:
+                    logger.warning(f"Resurrection copy failed for {job_id}: {e}")
+                    continue
+
+            if not stems:
+                continue
+
+            logger.info(f"🔁 Resurrecting orphaned job {job_id} → chat_id={chat_id}")
+            # Remove claim so this job isn't re-delivered twice
+            try:
+                os.remove(claim_path)
+            except Exception:
+                pass
+
+            results.append((job_id, chat_id, message_id, stems))
+
+        return results
 
     @staticmethod
     async def extract_music_dna_broker(audio_path: str, timeout_seconds: int = 30) -> Dict[str, Any]:
@@ -181,7 +295,7 @@ class AudioIntelligenceAdapter:
                 pass
 
     @staticmethod
-    async def separate_vocals(audio_path: str, timeout_seconds: int = 90) -> str:
+    async def separate_vocals(audio_path: str, timeout_seconds: int = 1800) -> str:
         """
         Extracts dry vocal stem from a song.
         Uses Mel-Band RoFormer via Broker; falls back to spectral center-channel isolation.

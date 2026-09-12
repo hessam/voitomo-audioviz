@@ -49,6 +49,35 @@ class AuthMiddleware(BaseMiddleware):
         return None
 
 
+async def resurrect_orphaned_jobs(bot: Bot) -> None:
+    """
+    On startup: find stem jobs that completed while we were killed,
+    and re-deliver a notification to the original user.
+    This ensures gateway restarts during long stem jobs don't silently
+    drop user requests.
+    """
+    from bot.services.audio_adapter import AudioIntelligenceAdapter
+    try:
+        orphans = AudioIntelligenceAdapter.collect_orphaned_stem_jobs()
+        for job_id, chat_id, message_id, stems in orphans:
+            try:
+                stem_names = ", ".join(stems.keys())
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"✅ **Your stems are ready** (job recovered after server restart)\n\n"
+                        f"Stems: {stem_names}\n\n"
+                        f"Please re-send your audio to generate the visualizer."
+                    ),
+                    parse_mode="Markdown",
+                )
+                logger.info(f"🔁 Resurrected job {job_id} → notified chat_id={chat_id}")
+            except Exception as e:
+                logger.warning(f"Failed to notify for orphaned job {job_id}: {e}")
+    except Exception as e:
+        logger.warning(f"Resurrection scan failed: {e}")
+
+
 async def main():
     lock_fd = acquire_single_instance_lock()
     bot = Bot(token=BOT_TOKEN)
@@ -57,6 +86,8 @@ async def main():
     dp.include_router(audioviz.router)
 
     logger.info(f"🚀 Audioviz 3D Visualizer Agent started (PID {os.getpid()}). Allowed: {ALLOWED_USERS}")
+    # Recover any stem jobs that completed while the bot was killed mid-wait
+    await resurrect_orphaned_jobs(bot)
     try:
         await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
     finally:

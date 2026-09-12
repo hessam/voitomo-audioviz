@@ -49,7 +49,7 @@ export interface RenderManifest {
     parameters: Record<string, number | string | boolean>;
   };
   video: {
-    width: 1080;
+    width: 1080 | 1920;
     height: 1080;
     fpsNumerator: 30;
     fpsDenominator: 1;
@@ -57,8 +57,8 @@ export interface RenderManifest {
   };
   audio: {
     masterUri: string;
-    vocalStemUri?: string;
-    bassStemUri?: string;
+    vocalStemUri?: string | null;
+    bassStemUri?: string | null;
     sha256: string;
     sampleRate: number;
     features: AudioMultibandFeatures;

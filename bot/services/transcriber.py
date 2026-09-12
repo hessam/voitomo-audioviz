@@ -25,6 +25,15 @@ def get_model():
         _model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
     return _model
 
+def unload_model():
+    global _model
+    if _model is not None:
+        del _model
+        _model = None
+        import gc
+        gc.collect()
+        logger.info("🧹 Unloaded Whisper model and freed RAM.")
+
 def normalize_words_with_llm(words: list) -> list:
     """
     Semantic Persian token normalizer using OpenRouter.
@@ -196,3 +205,4 @@ def transcribe(audio_path: str) -> dict:
     finally:
         if os.path.exists(wav_path):
             os.unlink(wav_path)
+        unload_model()

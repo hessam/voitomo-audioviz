@@ -57,7 +57,7 @@ class TestEndToEndManifest(unittest.TestCase):
                 )
             )
             self.assertEqual(manifest.preset.id, p)
-            self.assertEqual(manifest.video.width, 1080)
+            self.assertIn(manifest.video.width, (1080, 1920))
             self.assertEqual(manifest.video.height, 1080)
             self.assertEqual(manifest.video.frameCount, 60)
             self.assertEqual(len(manifest.audio.features.bass), 60)

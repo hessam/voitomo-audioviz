@@ -1,10 +1,11 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import os from "os";
-import { execSync } from "child_process";
+import { randomUUID } from "node:crypto";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { RenderInputError, validateDuration, validateManifest } from "./render_contract";
+import { prepareAudio } from "./render_audio";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -21,6 +22,7 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 app.use("/audio", express.static(AUDIO_DIR));
 
 let serveUrl: string | null = null;
+let bundlePromise: Promise<string> | null = null;
 
 function loadProfile(profileKey: string) {
   const indexPath = path.join(PROFILES_DIR, "index.json");
@@ -30,59 +32,54 @@ function loadProfile(profileKey: string) {
 }
 
 async function ensureBundle() {
-  if (!serveUrl) {
+  if (!bundlePromise) {
     console.log("📦 Bundling Remotion composition (one-time)...");
-    serveUrl = await bundle({
+    bundlePromise = bundle({
       entryPoint: path.resolve(__dirname, "./src/index.ts"),
       webpackOverride: (config) => config,
+    }).then((url) => {
+      serveUrl = url;
+      console.log("✅ Bundle ready:", url);
+      return url;
+    }).catch((error) => {
+      bundlePromise = null;
+      throw error;
     });
-    console.log("✅ Bundle ready:", serveUrl);
   }
-  return serveUrl;
+  return bundlePromise;
 }
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", bundled: serveUrl !== null });
 });
 app.post("/render", async (req, res) => {
-  const { manifest, scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = req.body;
+  const { manifest, scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = req.body || {};
 
   if (!manifest && !creativeSpec && (!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
     return res.status(400).json({ error: "manifest, creativeSpec, words, or scenes array required" });
   }
 
+  let cleanupAudio: (() => Promise<void>) | undefined;
   try {
-    const url = await ensureBundle();
-
-    const targetAudioSrc = manifest?.audio?.masterUri || audioSrc;
-    let resolvedAudioSrc = "";
-    if (targetAudioSrc && typeof targetAudioSrc === "string") {
-      if (targetAudioSrc.startsWith("http://") || targetAudioSrc.startsWith("https://")) {
-        resolvedAudioSrc = targetAudioSrc;
-      } else if (fs.existsSync(targetAudioSrc)) {
-        const baseName = `audio-${Date.now()}`;
-        const wavPath = path.join(AUDIO_DIR, `${baseName}.wav`);
-        try {
-          execSync(`ffmpeg -y -i "${targetAudioSrc}" -ar 44100 -ac 2 "${wavPath}" 2>/dev/null`);
-          resolvedAudioSrc = `http://127.0.0.1:${PORT}/audio/${baseName}.wav`;
-          console.log(`🎵 Audio converted to WAV: ${resolvedAudioSrc}`);
-        } catch (convErr) {
-          console.warn("⚠️ ffmpeg WAV conversion failed, serving original file:", convErr);
-          const ext = path.extname(targetAudioSrc) || ".ogg";
-          const copyPath = path.join(AUDIO_DIR, `${baseName}${ext}`);
-          fs.copyFileSync(targetAudioSrc, copyPath);
-          resolvedAudioSrc = `http://127.0.0.1:${PORT}/audio/${baseName}${ext}`;
-        }
+    if (durationInFrames !== undefined) validateDuration(durationInFrames);
+    if (manifest) {
+      validateManifest(manifest);
+      if (durationInFrames !== undefined && durationInFrames !== manifest.video.frameCount) {
+        throw new RenderInputError("durationInFrames conflicts with manifest.video.frameCount");
       }
     }
+    const prepared = await prepareAudio(manifest?.audio?.masterUri ?? audioSrc, AUDIO_DIR, PORT);
+    cleanupAudio = prepared.cleanup;
+    const resolvedAudioSrc = prepared.uri;
+    const url = await ensureBundle();
 
-    let inputProps: any;
+    let inputProps: Record<string, unknown>;
     let targetCompositionId: string;
     let renderDuration = durationInFrames;
 
     if (manifest) {
       targetCompositionId = "AudiovizMaster";
-      renderDuration = manifest.video?.frameCount || durationInFrames || 300;
+      renderDuration = manifest.video.frameCount;
       inputProps = {
         manifest,
         audioSrc: resolvedAudioSrc,
@@ -111,16 +108,25 @@ app.post("/render", async (req, res) => {
       };
     }
 
+    validateDuration(renderDuration);
     const composition = await selectComposition({
       serveUrl: url,
       id: targetCompositionId,
       inputProps,
     });
 
-    const outPath = path.join(OUT_DIR, `render-${Date.now()}.mp4`);
+    const outPath = path.join(OUT_DIR, `render-${randomUUID()}.mp4`);
 
     await renderMedia({
-      composition: { ...composition, durationInFrames: durationInFrames || composition.durationInFrames },
+      composition: {
+        ...composition,
+        durationInFrames: renderDuration,
+        ...(manifest ? {
+          width: manifest.video.width,
+          height: manifest.video.height,
+          fps: manifest.video.fpsNumerator / manifest.video.fpsDenominator,
+        } : {}),
+      },
       serveUrl: url,
       codec: "h264",
       crf: 20,
@@ -142,14 +148,17 @@ app.post("/render", async (req, res) => {
         headless: true,
         gl: "angle",
       },
-      timeoutInMilliseconds: 1800000,
+      timeoutInMilliseconds: Math.max(7200000, renderDuration * 2500),
     });
 
     console.log(`✅ Rendered: ${outPath}`);
     res.json({ path: outPath });
-  } catch (err: any) {
-    console.error("❌ Render error:", err?.message || err);
-    res.status(500).json({ error: err?.message || String(err) });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("❌ Render error:", message);
+    res.status(err instanceof RenderInputError ? 400 : 500).json({ error: message });
+  } finally {
+    if (cleanupAudio) await cleanupAudio().catch((error) => console.warn("Audio cleanup failed:", error));
   }
 });
 

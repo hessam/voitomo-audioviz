@@ -210,6 +210,8 @@ class AudioFeatureExtractor:
         words: Optional[List[Dict[str, Any]]] = None,
         preset_params: Optional[Dict[str, Any]] = None,
         seed: int = 42,
+        chat_id: int = 0,
+        message_id: int = 0,
     ) -> RenderManifest:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -227,7 +229,11 @@ class AudioFeatureExtractor:
         dna_data: Optional[Dict[str, Any]] = None
 
         try:
-            stems = await AudioIntelligenceAdapter.separate_stems_broker(audio_path)
+            stems = await AudioIntelligenceAdapter.separate_stems_broker(
+                audio_path,
+                chat_id=chat_id,
+                message_id=message_id,
+            )
             vocal_stem_path = stems.get("vocals")
             bass_stem_path = stems.get("bass")
             drums_stem_path = stems.get("drums")
@@ -302,6 +308,47 @@ class AudioFeatureExtractor:
                     )
                 )
 
+        # 4. Strict Sanitization Pass: Guarantee render_contract invariants for long songs
+        sanitized_lyrics: List[LyricLine] = []
+        prev_start = -1
+        for l in lyric_lines:
+            text = l.text.strip()
+            if not text:
+                continue
+            start = max(0, l.startFrame)
+            if start <= prev_start:
+                start = prev_start + 1
+            if start >= total_frames - 2:
+                break
+            end = max(start + 4, l.endFrame)
+            end = min(end, total_frames)
+            if start >= end:
+                continue
+            sanitized_lyrics.append(
+                LyricLine(
+                    text=text,
+                    startFrame=start,
+                    endFrame=end,
+                    isHero=bool(l.isHero),
+                )
+            )
+            prev_start = start
+
+        # Sanitize event frame arrays (non-decreasing, non-negative, strictly < total_frames)
+        features.transients = sorted(list(set(int(f) for f in features.transients if 0 <= f < total_frames)))
+        features.beatFrames = sorted(list(set(int(f) for f in features.beatFrames if 0 <= f < total_frames)))
+        features.downbeatFrames = sorted(list(set(int(f) for f in features.downbeatFrames if 0 <= f < total_frames)))
+
+        # Guarantee curve arrays match total_frames exactly
+        for curve_name in ["bass", "mids", "treble", "vocalEnergy", "drumsEnergy", "macroEnergy"]:
+            val = getattr(features, curve_name, [])
+            if len(val) < total_frames:
+                val = val + [0.0] * (total_frames - len(val))
+            elif len(val) > total_frames:
+                val = val[:total_frames]
+            val = [max(0.0, min(1.0, float(v))) for v in val]
+            setattr(features, curve_name, val)
+
         manifest = RenderManifest(
             schemaVersion=1,
             jobId=job_id,
@@ -326,7 +373,7 @@ class AudioFeatureExtractor:
                 bassStemUri=bass_stem_path,
                 features=features,
             ),
-            lyrics=LyricsConfig(lines=lyric_lines),
+            lyrics=LyricsConfig(lines=sanitized_lyrics),
             environment={
                 "concurrency": 2,
                 "gpuBackend": "angle",

@@ -7,15 +7,24 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_whisper_model = None
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "medium")
 
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        logger.info("⚡ Loading faster-whisper large-v3-turbo for singing voice...")
-        _whisper_model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+        logger.info(f"⚡ Loading faster-whisper {WHISPER_MODEL} for singing voice...")
+        _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
     return _whisper_model
+
+def unload_whisper_model():
+    global _whisper_model
+    if _whisper_model is not None:
+        del _whisper_model
+        _whisper_model = None
+        import gc
+        gc.collect()
+        logger.info("🧹 Unloaded singing-voice Whisper model and freed RAM.")
 
 def clean_lyric_token(text: str) -> str:
     """Filters out Whisper non-speech artifacts such as [music], (موسیقی), ♪, etc."""
@@ -107,3 +116,4 @@ def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None) 
     finally:
         if os.path.exists(wav_path):
             os.unlink(wav_path)
+        unload_whisper_model()

@@ -115,21 +115,26 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
 
     try:
         # 1. Compile Astra-compliant RenderManifest
+        chat_id = callback.message.chat.id if callback.message else 0
+        message_id = callback.message.message_id if callback.message else 0
         manifest = await AudioFeatureExtractor.extract_and_compile_manifest(
             job_id=job_id,
             audio_path=audio_path,
             preset_id=preset_id,  # type: ignore
             words=words,
+            chat_id=chat_id,
+            message_id=message_id,
         )
 
         manifest_dict = manifest.to_dict()
 
-        # 2. Trigger Remotion render on port 4001
+        # 2. Trigger Remotion render on port 4001 with dynamic timeout for long songs
+        total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{RENDERER_URL}/render",
                 json={"manifest": manifest_dict},
-                timeout=aiohttp.ClientTimeout(total=1800),
+                timeout=aiohttp.ClientTimeout(total=total_render_timeout),
             ) as resp:
                 if resp.status != 200:
                     err_text = await resp.text()
@@ -146,17 +151,28 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             shutil.copyfile(rendered_mp4, vault_dest)
             logger.info(f"📦 Successfully mirrored render to vault: {vault_dest}")
 
-        # 4. Guarantee file is under Telegram's 50MB bot upload limit (<= 48MB)
+        # 4. Guarantee file is under Telegram's 50MB bot upload limit (target <= 44MB)
         file_size = os.path.getsize(rendered_mp4)
         send_path = rendered_mp4
         if file_size > 48 * 1024 * 1024:
-            logger.warning(f"⚠️ Video size ({file_size / (1024*1024):.2f}MB) exceeds Telegram 48MB limit. Compressing with ffmpeg...")
+            duration_s = max(1.0, manifest.video.frameCount / 30.0)
+            target_kbits = 44 * 8 * 1024  # 44 MB safety ceiling in kbits
+            audio_kbps = 128
+            target_v_kbps = max(350, int((target_kbits / duration_s) - audio_kbps))
+            target_v_kbps = min(5500, target_v_kbps)
+            maxrate_kbps = int(target_v_kbps * 1.3)
+            bufsize_kbps = int(target_v_kbps * 2)
+
+            logger.warning(
+                f"⚠️ Video size ({file_size / (1024*1024):.2f}MB) exceeds Telegram 48MB limit. "
+                f"Compressing with target {target_v_kbps}k for {duration_s:.1f}s video..."
+            )
             compressed_path = rendered_mp4.replace(".mp4", "_tg_compat.mp4")
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y", "-i", rendered_mp4,
-                "-c:v", "libx264", "-b:v", "5500k", "-maxrate", "7000k", "-bufsize", "12000k",
-                "-c:a", "aac", "-b:a", "192k",
-                "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                "-c:v", "libx264", "-b:v", f"{target_v_kbps}k", "-maxrate", f"{maxrate_kbps}k", "-bufsize", f"{bufsize_kbps}k",
+                "-c:a", "aac", "-b:a", f"{audio_kbps}k",
+                "-preset", "fast", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 compressed_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

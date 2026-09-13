@@ -79,8 +79,10 @@ async def resurrect_orphaned_jobs(bot: Bot) -> None:
 
 
 async def main():
+    from aiogram.client.session.aiohttp import AiohttpSession
     lock_fd = acquire_single_instance_lock()
-    bot = Bot(token=BOT_TOKEN)
+    session = AiohttpSession(timeout=300.0)
+    bot = Bot(token=BOT_TOKEN, session=session)
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(AuthMiddleware())
     dp.include_router(audioviz.router)

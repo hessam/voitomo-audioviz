@@ -187,20 +187,36 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                         eta_sec = int(job_info.get("etaSeconds", 0))
 
                         now = time.time()
-                        if pct != last_pct and (now - last_edit_ts) >= 4.0:
-                            last_pct = pct
+                        if (now - last_edit_ts) >= 3.0:
                             last_edit_ts = now
+                            last_pct = pct
                             filled = min(10, max(0, pct // 10))
                             bar = "█" * filled + "░" * (10 - filled)
-                            m, s = divmod(eta_sec, 60)
-                            eta_str = f"{m}m {s}s" if m > 0 else f"{s}s"
+
+                            if pct >= 100 or frames_done >= total_f:
+                                status_text = (
+                                    f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
+                                    f"`[██████████]` **100%** (Frames complete)\n"
+                                    f"🎬 Finalizing video & audio encoding with FFmpeg..."
+                                )
+                            else:
+                                if eta_sec > 0:
+                                    m, s = divmod(eta_sec, 60)
+                                    eta_str = f"{m}m {s}s" if m > 0 else f"{s}s"
+                                else:
+                                    eta_str = "Calculating..."
+
+                                status_text = (
+                                    f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
+                                    f"`[{bar}]` **{pct}%**\n"
+                                    f"🎞 Frames: `{frames_done}/{total_f}`\n"
+                                    f"⏱ Est. Remaining: `{eta_str}`"
+                                )
+
                             if callback.message:
                                 try:
                                     await callback.message.edit_text(
-                                        f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
-                                        f"`[{bar}]` **{pct}%**\n"
-                                        f"🎞 Frames: `{frames_done}/{total_f}`\n"
-                                        f"⏱ Est. Remaining: `{eta_str}`",
+                                        status_text,
                                         parse_mode="Markdown",
                                     )
                                 except Exception:

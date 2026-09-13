@@ -12,8 +12,12 @@ app.use(express.json({ limit: "50mb" }));
 
 const PORT = 4001;
 const PROFILES_DIR = "/root/workspace/video_profiles";
-const OUT_DIR = "/tmp/audioviz-renders";
-const AUDIO_DIR = "/tmp/audioviz-audio";
+const OUT_DIR = fs.existsSync("/opt/hermes-vault/motion/renders")
+  ? "/opt/hermes-vault/motion/renders"
+  : "/tmp/audioviz-renders";
+const AUDIO_DIR = fs.existsSync("/opt/hermes-vault/motion/audio")
+  ? "/opt/hermes-vault/motion/audio"
+  : "/tmp/audioviz-audio";
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.mkdirSync(AUDIO_DIR, { recursive: true });

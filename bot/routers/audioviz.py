@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
 
 RENDERER_URL = os.environ.get("RENDERER_URL", "http://127.0.0.1:4001")
-VAULT_STORAGE_PATH = os.environ.get("VAULT_STORAGE_PATH", "/opt/hermes-vault/viz")
+VAULT_STORAGE_PATH = os.environ.get("VAULT_STORAGE_PATH", "/opt/hermes-vault/motion/renders")
 
 
 class VisualizerState(StatesGroup):

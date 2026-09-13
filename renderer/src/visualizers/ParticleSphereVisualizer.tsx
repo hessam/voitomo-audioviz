@@ -1,7 +1,8 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useMemo } from "react";
 import { useCurrentFrame, useVideoConfig, delayRender, continueRender } from "remotion";
 import * as THREE from "three";
 import { AudioMultibandFeatures } from "../types/manifest";
+import { compileSphereMotion } from "./sphereMotion";
 
 // 3D Simplex Noise in GLSL
 const simplexNoiseGLSL = `
@@ -60,6 +61,9 @@ uniform float uTreble;
 uniform float uVocal;
 uniform float uDrums;
 uniform float uTransient;
+uniform float uShockAge;
+uniform float uFlow;
+uniform float uTwist;
 uniform float uBeat;
 
 varying float vRidge;
@@ -78,41 +82,61 @@ void main() {
 
   vec3 n = normalize(position);
 
-  // Time & stem flow dynamics: vocal stem drives fluid speed acceleration
-  float flowTime = uTime * 0.22 + uVocal * 1.60 + uMids * 0.40;
+  // 1. Sustained Accumulated Vocal Flow:
+  // Instead of shifting noise phase by uVocal, uFlow is monotonically integrated across frames.
+  // When vocals are loud, the fluid accelerates. On pauses, it smoothly coasts without snapping back.
+  float flowTime = uFlow;
 
-  // 1. Multi-octave 3D Simplex noise folds the surface into smooth undulating organic lobes
-  // Large scale: broad, majestic rolling lobes that bulge outward and fold inward
-  vec3 pLobe = n * 1.15 + vec3(flowTime * 0.16, flowTime * 0.11, flowTime * 0.08);
+  // Helical organic twist driven by vocal flow
+  float cosT = cos(uTwist * 0.7);
+  float sinT = sin(uTwist * 0.7);
+  vec3 nTwist = vec3(n.x * cosT - n.z * sinT, n.y, n.x * sinT + n.z * cosT);
+
+  // Multi-octave 3D Simplex noise folds the surface into smooth undulating organic lobes
+  // Large scale: broad, majestic rolling lobes
+  vec3 pLobe = nTwist * 1.15 + vec3(flowTime * 0.16, flowTime * 0.11, flowTime * 0.08);
   float nLobe = snoise(pLobe);
 
   // Medium scale: secondary undulating folds
-  vec3 pFold = n * 2.30 - vec3(flowTime * 0.12, 0.0, flowTime * 0.16);
+  vec3 pFold = nTwist * 2.30 - vec3(flowTime * 0.12, 0.0, flowTime * 0.16);
   float nFold = snoise(pFold);
 
   // Fine scale: gentle surface waviness
-  vec3 pRipple = n * 4.40 + vec3(flowTime * 0.22);
+  vec3 pRipple = nTwist * 4.40 + vec3(flowTime * 0.22);
   float nRipple = snoise(pRipple);
 
   // Base structural organic displacement (harmonious rolling lobes)
   float baseDisp = nLobe * 0.58 + nFold * 0.22 + nRipple * 0.06;
 
-  // Stem-isolated dynamics:
-  // Bass drives macro lobe expansion exclusively
-  float bassWarp = nLobe * (uBass * 1.15);
-  // Mids drive secondary undulating folds
-  float midsWarp = nFold * (uMids * 0.45);
-  // Drums & transients drive the sharp outward propagating shockwave ring exclusively
-  float shockwave = sin(length(position) * 3.4 - uTime * 5.8) * (uDrums * 0.35 + uTransient * 0.28 + uBeat * 0.16);
+  // 2. Deterministic Bass Recoil:
+  // uBass has damped spring dynamics (sharp attack, elastic recoil, and rest)
+  float bassWarp = nLobe * (uBass * 1.35);
 
+  // 3. Mids drive secondary undulating folds
+  float midsWarp = nFold * (uMids * 0.45);
+
+  // 4. Physical Traveling Drum Pulses:
+  // Angular distance across sphere surface from front pole (0, 0, 1):
+  float d = acos(clamp(n.z, -1.0, 1.0)); // 0.0 at front, PI (3.14159) at back
+
+  // Continuous traveling drum wave ripples across surface:
+  float drumRipples = sin(d * 7.0 - uTime * 14.0) * (uDrums * 0.26);
+
+  // Transient shockwave pulse traveling outward from front pole to back:
+  float waveFront = uShockAge * 8.5; // Travels across sphere at ~8.5 rad/s
+  float waveDist = abs(d - waveFront);
+  float transientShock = exp(-waveDist * waveDist * 16.0) * sin(d * 24.0 - waveFront * 6.0) * (uTransient * 0.52);
+
+  float beatPulse = sin(d * 5.0 - uTime * 8.0) * (uBeat * 0.14);
+
+  float shockwave = drumRipples + transientShock + beatPulse;
   float totalDisp = baseDisp + bassWarp + midsWarp + shockwave;
   vDisp = totalDisp;
 
-  // Vertex displacement directly along normals: position + normal * noise * amplitude
+  // Vertex displacement directly along normals: position + normal * totalDisp
   vec3 displacedPosition = position + n * totalDisp;
 
   // Topographical contour bands wrapping along the organic lobes
-  // Higher frequency (18.0) yields fine, elegant topographic striations
   float topoElevation = displacedPosition.y * 18.0 + nLobe * 5.2 + nFold * 2.6 + flowTime * 0.42;
   float topoLine = sin(topoElevation);
   vRidge = smoothstep(-0.15, 0.62, topoLine);
@@ -121,14 +145,14 @@ void main() {
   vec4 mvPosition = modelViewMatrix * vec4(displacedPosition, 1.0);
   vDepth = -mvPosition.z;
 
-  // View direction & normal (calculated for both front and back particles)
+  // View direction & normal
   vec3 viewNormal = normalize(normalMatrix * (n + vec3(nFold * 0.15, nLobe * 0.18, 0.0)));
   vec3 viewDir = normalize(-mvPosition.xyz);
   vFacing = dot(viewNormal, viewDir);
   vFresnel = clamp(1.0 - abs(vFacing), 0.0, 1.0);
 
   // Point size: perspective scaled, crisp fine dots
-  float pSize = (3.4 + uTreble * 0.6 + vRidge * 0.8) * (360.0 / -mvPosition.z);
+  float pSize = (3.4 + uTreble * 0.6 + vRidge * 0.8 + uTransient * 0.4) * (360.0 / -mvPosition.z);
   gl_PointSize = clamp(pSize, 1.6, 5.2);
   gl_Position = projectionMatrix * mvPosition;
 }
@@ -356,6 +380,9 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
         uDrums:     { value: 0.0 },
         uTreble:    { value: 0.0 },
         uTransient: { value: 0.0 },
+        uShockAge:  { value: 10.0 },
+        uFlow:      { value: 0.0 },
+        uTwist:     { value: 0.0 },
         uBeat:      { value: 0.0 },
       },
       transparent: true,
@@ -428,7 +455,7 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
 
     threeRef.current = { renderer, scene, camera, orbPoints, orbMaterial, sparkMaterial, floorMaterial };
 
-    renderer.render(scene, camera);
+    renderScene(frame);
     continueRender(handle);
 
     return () => {
@@ -439,71 +466,67 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     };
   }, [width, height, handle]);
 
-  const timeSeconds = frame / fps;
-  const bass  = (features?.bass?.[frame] ?? 0.0) * intensity;
-  const vocal   = features?.vocalEnergy?.[frame] ?? 0.0;
-  const drums   = (features?.drumsEnergy?.[frame] ?? Math.max(bass * 0.75, features?.transients?.includes(frame) ? 1.0 : 0.0)) * intensity;
-  const rawMids = features?.mids?.[frame] ?? 0.0;
-  const mids    = (rawMids * 0.6 + vocal * 0.4) * intensity;
-  const treble  = (features?.treble?.[frame] ?? 0.0) * intensity;
+  const motionTimeline = useMemo(() => {
+    return compileSphereMotion(features, fps, intensity);
+  }, [features, fps, intensity]);
 
-  let beatImpulse = 0.0;
-  if (features?.beatFrames && features.beatFrames.length > 0) {
-    for (let i = features.beatFrames.length - 1; i >= 0; i--) {
-      const bf = features.beatFrames[i];
-      if (bf <= frame) {
-        const diff = frame - bf;
-        if (diff < 8) beatImpulse = Math.exp(-diff * 0.48);
-        break;
-      }
-    }
-  }
-
-  let transientImpulse = 0.0;
-  if (features?.transients && features.transients.length > 0) {
-    for (let i = features.transients.length - 1; i >= 0; i--) {
-      const tf = features.transients[i];
-      if (tf <= frame) {
-        const diff = frame - tf;
-        if (diff < 10) transientImpulse = Math.exp(-diff * 0.38);
-        break;
-      }
-    }
-  }
-
-  if (threeRef.current) {
+  function renderScene(f: number) {
+    if (!threeRef.current) return;
     const { renderer, scene, camera, orbPoints, orbMaterial, sparkMaterial, floorMaterial } = threeRef.current;
+    const motion = motionTimeline[Math.min(f, Math.max(0, motionTimeline.length - 1))] ?? {
+      bass: 0, mids: 0, treble: 0, vocal: 0, drums: 0, transient: 0, shockAge: 10, flow: 0, twist: 0
+    };
+    const timeSeconds = f / fps;
+
+    let beatImpulse = 0.0;
+    if (features?.beatFrames && features.beatFrames.length > 0) {
+      for (let i = features.beatFrames.length - 1; i >= 0; i--) {
+        const bf = features.beatFrames[i];
+        if (bf <= f) {
+          const diff = f - bf;
+          if (diff < 8) beatImpulse = Math.exp(-diff * 0.48);
+          break;
+        }
+      }
+    }
 
     orbMaterial.uniforms.uTime.value      = timeSeconds;
-    orbMaterial.uniforms.uBass.value      = bass;
-    orbMaterial.uniforms.uMids.value      = mids;
-    orbMaterial.uniforms.uVocal.value     = vocal;
-    orbMaterial.uniforms.uDrums.value     = drums;
-    orbMaterial.uniforms.uTreble.value    = treble;
-    orbMaterial.uniforms.uTransient.value = transientImpulse;
+    orbMaterial.uniforms.uBass.value      = motion.bass;
+    orbMaterial.uniforms.uMids.value      = motion.mids;
+    orbMaterial.uniforms.uVocal.value     = motion.vocal;
+    orbMaterial.uniforms.uDrums.value     = motion.drums;
+    orbMaterial.uniforms.uTreble.value    = motion.treble;
+    orbMaterial.uniforms.uTransient.value = motion.transient;
+    orbMaterial.uniforms.uShockAge.value  = motion.shockAge;
+    orbMaterial.uniforms.uFlow.value      = motion.flow;
+    orbMaterial.uniforms.uTwist.value     = motion.twist;
     orbMaterial.uniforms.uBeat.value      = beatImpulse;
 
     sparkMaterial.uniforms.uTime.value      = timeSeconds;
-    sparkMaterial.uniforms.uBass.value      = bass;
-    sparkMaterial.uniforms.uTreble.value    = treble;
-    sparkMaterial.uniforms.uTransient.value = transientImpulse;
+    sparkMaterial.uniforms.uBass.value      = motion.bass;
+    sparkMaterial.uniforms.uTreble.value    = motion.treble;
+    sparkMaterial.uniforms.uTransient.value = motion.transient;
 
-    floorMaterial.uniforms.uBass.value      = bass;
+    floorMaterial.uniforms.uBass.value      = motion.bass;
     floorMaterial.uniforms.uBeat.value      = beatImpulse;
-    floorMaterial.uniforms.uTransient.value = transientImpulse;
+    floorMaterial.uniforms.uTransient.value = motion.transient;
 
-    // Organic continuous rotation
-    orbPoints.rotation.y = timeSeconds * 0.08;
+    // Organic continuous rotation + subtle vocal twist
+    orbPoints.rotation.y = timeSeconds * 0.08 + motion.twist * 0.35;
     orbPoints.rotation.x = Math.sin(timeSeconds * 0.04) * 0.03;
 
-    // Subtle breathing on scale
-    const scale = 1.0 + bass * 0.04;
+    // Dynamic breathing scale driven by spring bass with recoil
+    const scale = 1.0 + motion.bass * 0.06;
     orbPoints.scale.set(scale, scale, scale);
 
     // Static widescreen camera
     camera.position.set(0, 0.25, 12.8);
 
     renderer.render(scene, camera);
+  }
+
+  if (threeRef.current) {
+    renderScene(frame);
   }
 
   return (

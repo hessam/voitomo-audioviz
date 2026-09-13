@@ -21,6 +21,29 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 // Serve converted audio files statically for Remotion / Chromium
 app.use("/audio", express.static(AUDIO_DIR));
 
+function cleanOldFiles() {
+  try {
+    const now = Date.now();
+    for (const dir of [OUT_DIR, AUDIO_DIR]) {
+      if (!fs.existsSync(dir)) continue;
+      for (const f of fs.readdirSync(dir)) {
+        const p = path.join(dir, f);
+        try {
+          const stat = fs.statSync(p);
+          if (now - stat.mtimeMs > 30 * 60 * 1000) {
+            fs.unlinkSync(p);
+            console.log(`🧹 Pruned old file: ${p}`);
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn("Prune error:", err);
+  }
+}
+setInterval(cleanOldFiles, 10 * 60 * 1000);
+cleanOldFiles();
+
 let serveUrl: string | null = null;
 let bundlePromise: Promise<string> | null = null;
 
@@ -167,6 +190,8 @@ async function runRenderJob(jobId: string, body: any): Promise<string> {
       },
       serveUrl: url,
       codec: "h264",
+      imageFormat: "jpeg",
+      jpegQuality: 80,
       crf: 20,
       x264Preset: "medium",
       pixelFormat: "yuv420p",

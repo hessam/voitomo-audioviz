@@ -162,6 +162,7 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             last_pct = -1
             poll_deadline = time.time() + total_render_timeout
 
+            render_error = None
             while time.time() < poll_deadline:
                 await asyncio.sleep(poll_interval)
                 try:
@@ -177,7 +178,8 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                             rendered_mp4 = job_info.get("path")
                             break
                         elif st == "error":
-                            raise RuntimeError(f"Render server error: {job_info.get('error')}")
+                            render_error = job_info.get("error") or "Unknown render server failure"
+                            break
 
                         pct = int(job_info.get("percent", 0))
                         frames_done = job_info.get("renderedFrames", 0)
@@ -205,6 +207,9 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                                     pass
                 except Exception as poll_err:
                     logger.debug(f"Progress poll notice: {poll_err}")
+
+            if render_error:
+                raise RuntimeError(f"Render server error: {render_error}")
 
         if not rendered_mp4 or not os.path.exists(rendered_mp4):
             raise FileNotFoundError(f"Rendered video not found at: {rendered_mp4}")
@@ -255,6 +260,14 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                 caption=f"✨ **Audioviz Render Complete**\nPreset: `{preset_id}` | Concurrency: 2 | 1080x1080",
                 parse_mode="Markdown",
             )
+
+        # Immediate cleanup of temporary renders to prevent disk exhaustion
+        for p in {rendered_mp4, send_path}:
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
     except Exception as e:
         logger.error(f"❌ Visualizer render failed: {e}", exc_info=True)

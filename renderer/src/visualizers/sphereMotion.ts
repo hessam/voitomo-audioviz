@@ -52,12 +52,15 @@ export function compileSphereMotion(features: AudioMultibandFeatures, fps: numbe
     const shockAge = (frame - lastHit) / fps;
     // Integrate speed, rather than adding instantaneous energy to a noise phase.
     // A phrase accelerates the flow; its release never rewinds the surface.
+    // When singing is present, vocals lead. During instrumental solos, melodic mids smoothly drive flow.
+    const currentMids = sample(features.mids, frame);
+    const leadMotion = Math.max(vocal, currentMids * 0.75);
     if (frame > 0) {
-      flow += (0.22 + vocal * 2.8) / fps;
-      twist += vocal * 0.55 / fps;
+      flow += (0.22 + leadMotion * 2.8) / fps;
+      twist += (vocal * 0.55 + currentMids * 0.25) / fps;
     }
     result.push({ bass: Math.max(-0.08, Math.min(1.08, bass)), vocal, drums,
-      mids: sample(features.mids, frame), treble: sample(features.treble, frame),
+      mids: currentMids, treble: sample(features.treble, frame),
       transient: strength * Math.exp(-shockAge * 6), shockAge, flow, twist });
   }
   return result;

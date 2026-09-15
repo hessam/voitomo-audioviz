@@ -202,8 +202,8 @@ void main() {
   vec3 rimWarm = vec3(1.00, 0.85, 0.180);
   col += rimWarm * (rim * 0.50);
 
-  // Energy flare on bass/transient drops
-  col *= (1.05 + uBass * 0.30 + uTransient * 0.40);
+  // Energy flare on bass/transient drops and expressive melodic solos
+  col *= (1.05 + uBass * 0.30 + uTransient * 0.40 + uMids * 0.22);
 
   // Additive blending alpha:
   // Points accumulate density in the dense core and overlapping folds

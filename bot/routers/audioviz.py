@@ -15,6 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from bot.services.audio_features import AudioFeatureExtractor, compute_sha256
 from bot.services.audio_adapter import AudioIntelligenceAdapter
 from bot.services.lyric_transcriber import transcribe_lyrics
+from bot.services.alignment import patch_word, parse_edit_command, realign_transcript
 
 logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
@@ -25,26 +26,30 @@ VAULT_STORAGE_PATH = os.environ.get("VAULT_STORAGE_PATH", "/opt/hermes-vault/mot
 
 class VisualizerState(StatesGroup):
     waiting_for_style = State()
+    waiting_for_edit = State()
     rendering = State()
 
 
-def get_visualizer_keyboard(job_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🌟 Particle Sphere (Golden Glow)", callback_data=f"viz:{job_id}:sphere"),
-            ],
-            [
-                InlineKeyboardButton(text="🌀 Quantum Iris (Cyan-Violet)", callback_data=f"viz:{job_id}:iris"),
-            ],
-            [
-                InlineKeyboardButton(text="⚡ Neural Synapse (Emerald Web)", callback_data=f"viz:{job_id}:neural"),
-            ],
-            [
-                InlineKeyboardButton(text="🏛️ Monolith Field (Acid-Lime)", callback_data=f"viz:{job_id}:monolith"),
-            ],
-        ]
-    )
+def get_visualizer_keyboard(job_id: str, has_words: bool = False) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(text="🌟 Particle Sphere (Golden Glow)", callback_data=f"viz:{job_id}:sphere"),
+        ],
+        [
+            InlineKeyboardButton(text="🌀 Quantum Iris (Cyan-Violet)", callback_data=f"viz:{job_id}:iris"),
+        ],
+        [
+            InlineKeyboardButton(text="⚡ Neural Synapse (Emerald Web)", callback_data=f"viz:{job_id}:neural"),
+        ],
+        [
+            InlineKeyboardButton(text="🏛️ Monolith Field (Acid-Lime)", callback_data=f"viz:{job_id}:monolith"),
+        ],
+    ]
+    if has_words:
+        buttons.append([
+            InlineKeyboardButton(text="✏️ ویرایش متن ترانه / Edit Lyrics", callback_data=f"viz:{job_id}:edit")
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # Active audio cache by job_id
@@ -103,9 +108,17 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
         "words": words,
     }
 
-    keyboard = get_visualizer_keyboard(job_id)
+    keyboard = get_visualizer_keyboard(job_id, has_words=bool(words))
+    
+    lyric_preview = ""
+    if words:
+        full_lyrics = " ".join(w.get("word", "") for w in words).strip()
+        if len(full_lyrics) > 280:
+            full_lyrics = full_lyrics[:280] + "..."
+        lyric_preview = f"🎙 **متن شناسایی‌شده ترانه:**\n_{full_lyrics}_\n\n"
+
     await status_msg.edit_text(
-        "🎛 **Select a 3D Audio Visualizer Style:**\n\n"
+        f"{lyric_preview}🎛 **Select a 3D Audio Visualizer Style:**\n\n"
         "• **Particle Sphere**: 20k gold-amber emissive particles with 3D noise\n"
         "• **Quantum Iris**: Torus knot inside-out ribbon with cyan-violet flare\n"
         "• **Neural Synapse**: 1,500 glowing nodes with emerald shockwaves\n"
@@ -127,6 +140,24 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
     cache_item = _AUDIO_CACHE.get(job_id)
     if not cache_item:
         await callback.answer("Audio session expired. Please re-send the audio.", show_alert=True)
+        return
+
+    # Handle Edit Request
+    if preset_id == "edit":
+        await callback.answer()
+        await state.update_data(current_edit_job_id=job_id)
+        await state.set_state(VisualizerState.waiting_for_edit)
+        words = cache_item.get("words", [])
+        full_lyrics = " ".join(w.get("word", "") for w in words).strip()
+        if callback.message:
+            await callback.message.reply(
+                "✏️ **ویرایش متن ترانه / Edit Lyrics**\n\n"
+                f"متن فعلی:\n_{full_lyrics}_\n\n"
+                "برای اصلاح، کلمه مورد نظر را به شکل زیر بفرستید:\n"
+                "`کلمه_قدیم -> کلمه_جدید`\n\n"
+                "یا در صورت نیاز، کل متن اصلاح‌شده را به صورت یکجا ارسال نمایید.",
+                parse_mode="Markdown",
+            )
         return
 
     await callback.answer()
@@ -299,3 +330,48 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             await callback.message.answer(f"❌ Visualizer generation failed: {str(e)[:200]}")
     finally:
         await state.clear()
+
+
+@router.message(VisualizerState.waiting_for_edit, F.text)
+async def handle_lyric_edit(message: Message, state: FSMContext):
+    data = await state.get_data()
+    job_id = data.get("current_edit_job_id")
+    if not job_id or job_id not in _AUDIO_CACHE:
+        await message.answer("⚠️ نشست ویرایش منقضی شده است. لطفا فایل صوتی را دوباره ارسال کنید.")
+        await state.clear()
+        return
+
+    cache_item = _AUDIO_CACHE[job_id]
+    orig_words = cache_item.get("words", [])
+    text = (message.text or "").strip()
+
+    parsed = parse_edit_command(text)
+    if parsed:
+        old_word, new_word = parsed
+        patched_words = patch_word(orig_words, old_word, new_word)
+        if patched_words == orig_words:
+            await message.answer(f"⚠️ کلمه «{old_word}» در متن ترانه یافت نشد. لطفا املای آن را بررسی کنید.")
+            return
+        cache_item["words"] = patched_words
+        await message.answer(f"✅ اصلاح شد: «{old_word}» → «{new_word}»")
+    else:
+        # Full text replacement aligned to existing audio timestamps
+        realigned = realign_transcript(orig_words, text)
+        cache_item["words"] = realigned
+        await message.answer("✅ کل متن ترانه به‌روزرسانی و با زمان‌بندی صوت همگام‌سازی شد.")
+
+    # Re-display style selection with updated lyrics
+    updated_words = cache_item.get("words", [])
+    full_lyrics = " ".join(w.get("word", "") for w in updated_words).strip()
+    if len(full_lyrics) > 280:
+        full_lyrics = full_lyrics[:280] + "..."
+    lyric_preview = f"🎙 **متن اصلاح‌شده ترانه:**\n_{full_lyrics}_\n\n" if full_lyrics else ""
+
+    keyboard = get_visualizer_keyboard(job_id, has_words=bool(updated_words))
+    await message.answer(
+        f"{lyric_preview}🎛 **اکنون استایل ویژوالایزر را انتخاب کنید:**",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+    )
+    await state.set_state(VisualizerState.waiting_for_style)
+

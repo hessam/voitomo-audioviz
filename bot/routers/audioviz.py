@@ -63,7 +63,7 @@ def get_visualizer_keyboard(job_id: str, has_words: bool = False, show_lyrics: b
 _AUDIO_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-@router.message(F.audio | F.voice)
+@router.message(F.audio | F.voice | (F.document & F.document.mime_type.startswith("audio/")))
 async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
     user_id = message.from_user.id if message.from_user else 0
     job_id = f"viz-{user_id}-{message.message_id}"
@@ -71,7 +71,7 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
     status_msg = await message.reply("📥 Downloading audio track...")
 
     os.makedirs("/tmp/audioviz-audio", exist_ok=True)
-    audio_obj = message.audio or message.voice
+    audio_obj = message.audio or message.voice or message.document
     if getattr(audio_obj, "duration", None) and audio_obj.duration > 600:
         mins = audio_obj.duration // 60
         await status_msg.edit_text(
@@ -83,7 +83,7 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
     file_id = audio_obj.file_id
 
     file_info = await bot.get_file(file_id)
-    file_ext = os.path.splitext(file_info.file_path or ".mp3")[1] or ".mp3"
+    file_ext = os.path.splitext(file_info.file_path or getattr(audio_obj, "file_name", "") or ".mp3")[1] or ".mp3"
     local_path = f"/tmp/audioviz-audio/{job_id}{file_ext}"
 
     await bot.download_file(file_info.file_path, local_path)

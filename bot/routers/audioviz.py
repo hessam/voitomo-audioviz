@@ -30,7 +30,7 @@ class VisualizerState(StatesGroup):
     rendering = State()
 
 
-def get_visualizer_keyboard(job_id: str, has_words: bool = False) -> InlineKeyboardMarkup:
+def get_visualizer_keyboard(job_id: str, has_words: bool = False, show_lyrics: bool = True) -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton(text="🌟 Particle Sphere (Golden Glow)", callback_data=f"viz:{job_id}:sphere"),
@@ -46,9 +46,16 @@ def get_visualizer_keyboard(job_id: str, has_words: bool = False) -> InlineKeybo
         ],
     ]
     if has_words:
-        buttons.append([
-            InlineKeyboardButton(text="✏️ ویرایش متن ترانه / Edit Lyrics", callback_data=f"viz:{job_id}:edit")
-        ])
+        toggle_label = "📝 متن ترانه: فعال (خاموش کردن)" if show_lyrics else "🚫 متن ترانه: غیرفعال (روشن کردن)"
+        toggle_action = "disable_lyrics" if show_lyrics else "enable_lyrics"
+        action_row = [
+            InlineKeyboardButton(text=toggle_label, callback_data=f"viz:{job_id}:{toggle_action}")
+        ]
+        if show_lyrics:
+            action_row.append(
+                InlineKeyboardButton(text="✏️ ویرایش متن", callback_data=f"viz:{job_id}:edit")
+            )
+        buttons.append(action_row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -106,9 +113,10 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
         "audio_path": local_path,
         "vocal_path": vocal_path,
         "words": words,
+        "show_lyrics": True,
     }
 
-    keyboard = get_visualizer_keyboard(job_id, has_words=bool(words))
+    keyboard = get_visualizer_keyboard(job_id, has_words=bool(words), show_lyrics=True)
     
     lyric_preview = ""
     if words:
@@ -142,6 +150,39 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         await callback.answer("Audio session expired. Please re-send the audio.", show_alert=True)
         return
 
+    # Handle Lyrics Toggle
+    if preset_id in ("disable_lyrics", "enable_lyrics"):
+        show_lyrics = (preset_id == "enable_lyrics")
+        cache_item["show_lyrics"] = show_lyrics
+        await callback.answer("متن ترانه غیرفعال شد (فقط ویژوالایزر)" if not show_lyrics else "متن ترانه فعال شد")
+        
+        words = cache_item.get("words", [])
+        updated_keyboard = get_visualizer_keyboard(job_id, has_words=bool(words), show_lyrics=show_lyrics)
+        
+        lyric_preview = ""
+        if words and show_lyrics:
+            full_lyrics = " ".join(w.get("word", "") for w in words).strip()
+            if len(full_lyrics) > 280:
+                full_lyrics = full_lyrics[:280] + "..."
+            lyric_preview = f"🎙 **متن شناسایی‌شده ترانه:**\n_{full_lyrics}_\n\n"
+        elif words and not show_lyrics:
+            lyric_preview = "🚫 _حالت بدون متن انتخاب شده است (فقط انیمیشن ۳ بعدی ویژوالایزر)_\n\n"
+
+        if callback.message:
+            try:
+                await callback.message.edit_text(
+                    f"{lyric_preview}🎛 **Select a 3D Audio Visualizer Style:**\n\n"
+                    "• **Particle Sphere**: 20k gold-amber emissive particles with 3D noise\n"
+                    "• **Quantum Iris**: Torus knot inside-out ribbon with cyan-violet flare\n"
+                    "• **Neural Synapse**: 1,500 glowing nodes with emerald shockwaves\n"
+                    "• **Monolith Field**: 1,024 obsidian pillars with neon lime caps",
+                    reply_markup=updated_keyboard,
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+        return
+
     # Handle Edit Request
     if preset_id == "edit":
         await callback.answer()
@@ -165,7 +206,8 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         await callback.message.edit_text(f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n1. Extracting multiband FFT arrays\n2. Evaluating deterministic WebGL frames", parse_mode="Markdown")
 
     audio_path = cache_item["audio_path"]
-    words = cache_item.get("words", [])
+    show_lyrics = cache_item.get("show_lyrics", True)
+    words = cache_item.get("words", []) if show_lyrics else []
 
     try:
         # 1. Compile Astra-compliant RenderManifest
@@ -362,12 +404,13 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
 
     # Re-display style selection with updated lyrics
     updated_words = cache_item.get("words", [])
+    show_lyrics = cache_item.get("show_lyrics", True)
     full_lyrics = " ".join(w.get("word", "") for w in updated_words).strip()
     if len(full_lyrics) > 280:
         full_lyrics = full_lyrics[:280] + "..."
     lyric_preview = f"🎙 **متن اصلاح‌شده ترانه:**\n_{full_lyrics}_\n\n" if full_lyrics else ""
 
-    keyboard = get_visualizer_keyboard(job_id, has_words=bool(updated_words))
+    keyboard = get_visualizer_keyboard(job_id, has_words=bool(updated_words), show_lyrics=show_lyrics)
     await message.answer(
         f"{lyric_preview}🎛 **اکنون استایل ویژوالایزر را انتخاب کنید:**",
         reply_markup=keyboard,

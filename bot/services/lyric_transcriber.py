@@ -16,7 +16,7 @@ def get_whisper_model():
     if _whisper_model is None:
         from faster_whisper import WhisperModel
         logger.info(f"⚡ Loading faster-whisper {WHISPER_MODEL} for singing voice...")
-        _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8", cpu_threads=2)
     return _whisper_model
 
 def unload_whisper_model():
@@ -42,18 +42,85 @@ def clean_lyric_token(text: str) -> str:
     t = re.sub(r"[،,.\-_!?؟\s]+$", "", t)
     return t.strip()
 
+AUDIOVIZ_BROKER_DIR = os.environ.get("AUDIOVIZ_BROKER_DIR", "/workspace/audioviz-broker")
+
+def transcribe_lyrics_broker(vocal_audio_path: str, user_lyrics: Optional[str] = None, language: Optional[str] = None, timeout_sec: int = 600) -> Dict[str, Any]:
+    import shutil
+    import uuid
+    import time
+    import json
+    job_id = f"transcribe_{uuid.uuid4().hex[:10]}"
+    job_dir = os.path.join(AUDIOVIZ_BROKER_DIR, "jobs", job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    try:
+        input_dest = os.path.join(job_dir, "input.wav")
+        shutil.copy2(vocal_audio_path, input_dest)
+        trigger = {
+            "job_id": job_id,
+            "action": "transcribe",
+            "audio_filename": "input.wav",
+            "model": WHISPER_MODEL,
+            "language": language
+        }
+        with open(os.path.join(job_dir, "trigger.json"), "w") as f:
+            json.dump(trigger, f)
+
+        logger.info(f"🚀 Sent transcribe job {job_id} ({WHISPER_MODEL}) to host orchestrator...")
+        result_file = os.path.join(job_dir, "result.json")
+        out_transcript = os.path.join(job_dir, "output", "transcript.json")
+
+        start = time.time()
+        while time.time() - start < timeout_sec:
+            if os.path.exists(result_file):
+                break
+            time.sleep(0.5)
+
+        if not os.path.exists(result_file):
+            raise TimeoutError(f"Transcribe job {job_id} timed out after {timeout_sec}s")
+
+        with open(result_file, "r") as f:
+            res_data = json.load(f)
+
+        if res_data.get("status") != "success":
+            raise RuntimeError(f"Transcribe job {job_id} failed: {res_data.get('error')}")
+
+        with open(out_transcript, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if user_lyrics and user_lyrics.strip():
+            from bot.services.alignment import realign_transcript
+            aligned_words = realign_transcript(data.get("words", []), user_lyrics.strip(), data.get("duration", 0.0))
+            return {
+                "text": user_lyrics.strip(),
+                "words": aligned_words,
+                "duration": data.get("duration", 0.0),
+                "is_singing": True
+            }
+        data["is_singing"] = True
+        return data
+    finally:
+        if os.path.exists(job_dir):
+            try:
+                shutil.rmtree(job_dir)
+            except Exception:
+                pass
+
 def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None, language: Optional[str] = None) -> Dict[str, Any]:
     """
     Singing-Voice Persian/English Transcription Engine:
-    1. Suppresses non-speech [music] hallucinations.
-    2. Uses condition_on_previous_text=False to prevent repetitive cascades.
-    3. Primes ASR with poetic lyrical meter.
-    4. If user provides verified lyrics, aligns them with acoustic timestamps.
+    1. Offloads to host orchestrator if broker mount is present.
+    2. Falls back to local in-process faster-whisper only if standalone.
     """
-    # 1. Convert to 16kHz mono WAV
+    if os.path.exists(AUDIOVIZ_BROKER_DIR):
+        try:
+            return transcribe_lyrics_broker(vocal_audio_path, user_lyrics, language)
+        except Exception as e:
+            logger.warning(f"Orchestrator transcription failed, falling back to local: {e}")
+
+    # Local fallback
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         wav_path = tmp.name
-    
+
     subprocess.run([
         "ffmpeg", "-y", "-i", vocal_audio_path,
         "-ar", "16000", "-ac", "1", "-f", "wav", wav_path

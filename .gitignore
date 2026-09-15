@@ -19,3 +19,4 @@ node_modules/
 *.wav
 *.ogg
 logs/
+renderer/rendered_particle_sphere.png

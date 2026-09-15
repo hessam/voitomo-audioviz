@@ -60,6 +60,14 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
 
     os.makedirs("/tmp/audioviz-audio", exist_ok=True)
     audio_obj = message.audio or message.voice
+    if getattr(audio_obj, "duration", None) and audio_obj.duration > 600:
+        mins = audio_obj.duration // 60
+        await status_msg.edit_text(
+            f"⚠️ **Audio file is too long ({mins} minutes).**\n\n"
+            "The 60fps 3D Visualizer engine supports tracks up to 10 minutes maximum to guarantee rendering fidelity. Please trim your track and re-send."
+        )
+        return
+
     file_id = audio_obj.file_id
 
     file_info = await bot.get_file(file_id)

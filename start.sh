@@ -4,10 +4,14 @@ set -e
 export NVM_DIR="/root/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-export AUDIOVIZ_BOT_TOKEN=""
-export TELEGRAM_ALLOWED_USERS="92241363,6027086169"
-export RENDERER_URL="http://127.0.0.1:4001"
-export VAULT_STORAGE_PATH="/opt/hermes-vault/viz"
+# Load environment variables from .env if present
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
+export RENDERER_URL="${RENDERER_URL:-http://127.0.0.1:4001}"
+export VAULT_STORAGE_PATH="${VAULT_STORAGE_PATH:-/opt/hermes-vault/viz}"
 
 cd /root/audioviz
 

@@ -34,7 +34,7 @@ def acquire_single_instance_lock():
 from bot.routers import voice, edit, music
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-ALLOWED_USERS = set(int(x) for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "92241363,6027086169").split(","))
+ALLOWED_USERS = set(int(x.strip()) for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "").split(",") if x.strip().isdigit())
 
 class AuthMiddleware(BaseMiddleware):
     async def __call__(self, handler: Callable, event: TelegramObject, data: Dict[str, Any]) -> Any:

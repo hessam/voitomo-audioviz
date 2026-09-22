@@ -105,92 +105,41 @@ def transcribe_lyrics_broker(vocal_audio_path: str, user_lyrics: Optional[str] =
             except Exception:
                 pass
 
+def transcribe_lyrics_gpu(vocal_audio_path: str, ai_url: str, user_lyrics: Optional[str] = None, language: Optional[str] = None) -> Dict[str, Any]:
+    import requests
+    with open(vocal_audio_path, "rb") as f:
+        files = {"file": (os.path.basename(vocal_audio_path), f, "audio/wav")}
+        data = {}
+        if language:
+            data["language"] = language
+        logger.info(f"🚀 Offloading singing voice transcription to GPU at {ai_url}/ai/transcribe (Whisper large-v3 CUDA)...")
+        resp = requests.post(f"{ai_url}/ai/transcribe", files=files, data=data, timeout=120)
+        if resp.status_code == 200:
+            res_data = resp.json()
+            if res_data.get("status") == "success":
+                logger.info(f"⚡ GPU Transcription completed in {res_data.get('elapsed_seconds')}s: {len(res_data.get('words', []))} words")
+                if user_lyrics and user_lyrics.strip():
+                    from bot.services.alignment import realign_transcript
+                    aligned_words = realign_transcript(res_data.get("words", []), user_lyrics.strip(), res_data.get("duration", 0.0))
+                    return {
+                        "text": user_lyrics.strip(),
+                        "words": aligned_words,
+                        "duration": res_data.get("duration", 0.0),
+                        "is_singing": True
+                    }
+                res_data["is_singing"] = True
+                return res_data
+        raise RuntimeError(f"GPU transcribe returned {resp.status_code}: {resp.text}")
+
 def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None, language: Optional[str] = None) -> Dict[str, Any]:
     """
     Singing-Voice Persian/English Transcription Engine:
-    1. Offloads to host orchestrator if broker mount is present.
-    2. Falls back to local in-process faster-whisper only if standalone.
+    Strictly offloads to GPU AI endpoint (Whisper large-v3 CUDA) at port 4002.
+    Zero Hetzner broker CPU offload.
     """
-    if os.path.exists(AUDIOVIZ_BROKER_DIR):
-        try:
-            return transcribe_lyrics_broker(vocal_audio_path, user_lyrics, language)
-        except Exception as e:
-            logger.warning(f"Orchestrator transcription failed, falling back to local: {e}")
-
-    # Local fallback
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        wav_path = tmp.name
-
-    subprocess.run([
-        "ffmpeg", "-y", "-i", vocal_audio_path,
-        "-ar", "16000", "-ac", "1", "-f", "wav", wav_path
-    ], capture_output=True, check=True)
-
+    ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL") or "http://127.0.0.1:4002"
     try:
-        model = get_whisper_model()
-        
-        prompt = (
-            "متن ترانه، شعر فارسی، کلمات آواز و موسیقی روان و بدون غلط."
-            if language == "fa"
-            else "Song lyrics, clean vocal words, singing transcript without errors."
-            if language == "en"
-            else "متن ترانه، شعر فارسی و انگلیسی، کلمات آواز و موسیقی روان."
-        )
-
-        # We disable condition_on_previous_text so singing pauses do not loop hallucinations
-        segments, info = model.transcribe(
-            wav_path,
-            language=language,
-            task="transcribe",
-            beam_size=5,
-            word_timestamps=True,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=600, speech_pad_ms=300),
-            initial_prompt=prompt,
-            condition_on_previous_text=False,
-            prepend_punctuations="«\"'([{-",
-            append_punctuations="»\"'.)،!؟:;]}"
-        )
-
-        raw_words = []
-        full_text_parts = []
-
-        for seg in segments:
-            if seg.words:
-                for w in seg.words:
-                    clean_w = clean_lyric_token(w.word)
-                    # Exclude non-speech markers like 'music', 'موزیک', etc.
-                    if clean_w and clean_w.lower() not in ["music", "موزیک", "آهنگ", "موسیقی", "..."]:
-                        raw_words.append({
-                            "word": clean_w,
-                            "start": float(round(w.start, 3)),
-                            "end": float(round(w.end, 3))
-                        })
-            seg_text = clean_lyric_token(seg.text)
-            if seg_text:
-                full_text_parts.append(seg_text)
-
-        reconstructed_text = " ".join(w["word"] for w in raw_words) if raw_words else " ".join(full_text_parts)
-
-        # 2. If user supplied verified lyrics, realign them to acoustic timestamps
-        if user_lyrics and user_lyrics.strip():
-            from bot.services.alignment import realign_transcript
-            aligned_words = realign_transcript(raw_words, user_lyrics.strip(), info.duration)
-            return {
-                "text": user_lyrics.strip(),
-                "words": aligned_words,
-                "duration": info.duration,
-                "is_singing": True
-            }
-
-        return {
-            "text": reconstructed_text.strip(),
-            "words": raw_words,
-            "duration": info.duration,
-            "is_singing": True
-        }
-
-    finally:
-        if os.path.exists(wav_path):
-            os.unlink(wav_path)
+        return transcribe_lyrics_gpu(vocal_audio_path, ai_url, user_lyrics, language)
+    except Exception as e:
+        logger.error(f"GPU remote transcription failed: {e}")
         unload_whisper_model()

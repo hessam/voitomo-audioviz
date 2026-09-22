@@ -69,6 +69,22 @@ class TestEndToEndManifest(unittest.TestCase):
             serialized = json.dumps(manifest.to_dict(), ensure_ascii=False)
             self.assertIn(f"test-{p}", serialized)
 
+    def test_show_lyrics_false_yields_zero_lyrics(self):
+        words = [
+            {"word": "صدای", "start": 0.1, "end": 0.4},
+            {"word": "سکوت", "start": 0.4, "end": 0.8},
+        ]
+        manifest = asyncio.run(
+            AudioFeatureExtractor.extract_and_compile_manifest(
+                job_id="test-no-lyrics",
+                audio_path=self.audio_path,
+                preset_id="sphere",
+                words=words,
+                show_lyrics=False,
+            )
+        )
+        self.assertEqual(len(manifest.lyrics.lines), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

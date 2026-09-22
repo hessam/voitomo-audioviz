@@ -88,10 +88,7 @@ def post_json(url: str, headers: dict, payload: dict, timeout: int = 30) -> dict
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
-OPENROUTER_API_KEY = os.environ.get(
-    "OPENROUTER_API_KEY",
-    ""
-)
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 LLM_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
 
 VALID_ICONS = [

@@ -5,9 +5,11 @@ import logging
 import aiohttp
 import asyncio
 import time
+from urllib.parse import quote
 from typing import Dict, Any
 
 from aiogram import Router, F, Bot
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -20,8 +22,57 @@ from bot.services.alignment import patch_word, parse_edit_command, realign_trans
 logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
 
-RENDERER_URL = os.environ.get("RENDERER_URL", "http://127.0.0.1:4001")
+RENDERER_URL = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("RENDERER_URL", "http://127.0.0.1:4002")
 VAULT_STORAGE_PATH = os.environ.get("VAULT_STORAGE_PATH", "/opt/hermes-vault/motion/renders")
+
+@router.message(Command("gpu", "gpu_status"))
+async def cmd_gpu_status(message: Message):
+    from bot.services.vast_lifecycle import VastLifecycleManager
+    mgr = VastLifecycleManager.get_instance()
+    inst = await mgr.get_active_instance()
+    if not inst:
+        await message.reply("❌ No Vast GPU instance configured.")
+        return
+    st = inst.get("actual_status", "unknown")
+    gpu = inst.get("gpu_name", "RTX 3060")
+    cost = inst.get("dph_total", 0.05)
+    idle = int(time.time() - mgr.last_active_time)
+    
+    text = (
+        f"🖥️ **Vast GPU Status:** `{st.upper()}`\n"
+        f"• **Hardware:** {gpu} (12GB VRAM)\n"
+        f"• **Hourly Rate:** ${cost:.3f}/hr\n"
+        f"• **Idle Time:** {idle}s / 300s limit\n\n"
+        f"Instance auto-stops when idle for >5 minutes to eliminate waste."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚡ Wake GPU", callback_data="gpu:wake"),
+            InlineKeyboardButton(text="🛑 Stop GPU", callback_data="gpu:stop")
+        ]
+    ])
+    await message.reply(text, reply_markup=kb, parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("gpu:"))
+async def handle_gpu_callback(callback: CallbackQuery):
+    action = callback.data.split(":")[1]
+    from bot.services.vast_lifecycle import VastLifecycleManager
+    mgr = VastLifecycleManager.get_instance()
+    if action == "wake":
+        await callback.answer("Waking GPU...")
+        if callback.message:
+            await callback.message.edit_text("⏳ Waking up GPU instance (~20-30s)...")
+        ready = await mgr.ensure_gpu_ready()
+        if callback.message:
+            if ready:
+                await callback.message.edit_text("✅ **GPU is ONLINE and tunnel is active!**", parse_mode="Markdown")
+            else:
+                await callback.message.edit_text("⚠️ **GPU wake failed or resources busy.**", parse_mode="Markdown")
+    elif action == "stop":
+        await callback.answer("Stopping GPU...")
+        await mgr.stop_gpu()
+        if callback.message:
+            await callback.message.edit_text("🛑 **GPU stopped. Billing paused.**", parse_mode="Markdown")
 
 
 class VisualizerState(StatesGroup):
@@ -88,23 +139,40 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
 
     await bot.download_file(file_info.file_path, local_path)
 
-    # 1. Isolate vocals first (Voitomo pipeline) to prevent music from contaminating ASR
-    await status_msg.edit_text("🎙 Isolating vocals via stem separator...")
-    vocal_path = None
+    # 1. Isolate vocals with Mel-Band RoFormer strictly on GPU (up to 5m wait)
+    async def update_status(text: str):
+        try:
+            await status_msg.edit_text(text, parse_mode="Markdown")
+        except Exception:
+            pass
+
+    await update_status("⚡ **Connecting to GPU for Mel-Band RoFormer stem separation...**")
     try:
-        vocal_path = await AudioIntelligenceAdapter.separate_vocals(local_path)
+        stems = await AudioIntelligenceAdapter.separate_stems_broker(
+            local_path,
+            timeout_seconds=300,
+            status_callback=update_status
+        )
+        vocal_path = stems.get("vocals")
     except Exception as e:
-        logger.info(f"Pre-vocal separation skipped/fallback: {e}")
+        logger.error(f"Stem separation failed: {e}")
+        await status_msg.edit_text(
+            f"❌ **GPU Processing Error:**\n\n"
+            f"Could not run Mel-Band RoFormer on GPU: {e}\n\n"
+            "Stem separation is strictly executed on dedicated GPU hardware (Hetzner CPU fallback is disabled). Please try again in a few moments.",
+            parse_mode="Markdown"
+        )
+        return
 
     # 2. Singing-voice lyric transcription on isolated vocals (or master fallback)
     await status_msg.edit_text("🔍 Extracting vocal lyrics via Whisper...")
     words = []
     transcribe_target = vocal_path if vocal_path and os.path.exists(vocal_path) else local_path
     try:
-        res = await asyncio.to_thread(transcribe_lyrics, transcribe_target)
+        res = await asyncio.to_thread(transcribe_lyrics, transcribe_target, None, "fa")
         words = res.get("words", [])
         if not words and transcribe_target != local_path:
-            res_fb = await asyncio.to_thread(transcribe_lyrics, local_path)
+            res_fb = await asyncio.to_thread(transcribe_lyrics, local_path, None, "fa")
             words = res_fb.get("words", [])
     except Exception as e:
         logger.info(f"Vocal transcription skipped or unavailable: {e}")
@@ -112,6 +180,7 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
     _AUDIO_CACHE[job_id] = {
         "audio_path": local_path,
         "vocal_path": vocal_path,
+        "stems": stems,
         "words": words,
         "show_lyrics": True,
     }
@@ -205,6 +274,12 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
     if callback.message:
         await callback.message.edit_text(f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n1. Extracting multiband FFT arrays\n2. Evaluating deterministic WebGL frames", parse_mode="Markdown")
 
+    try:
+        from bot.services.vast_lifecycle import VastLifecycleManager
+        VastLifecycleManager.get_instance().record_activity()
+    except Exception:
+        pass
+
     audio_path = cache_item["audio_path"]
     show_lyrics = cache_item.get("show_lyrics", True)
     words = cache_item.get("words", []) if show_lyrics else []
@@ -220,14 +295,38 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             words=words,
             chat_id=chat_id,
             message_id=message_id,
+            pre_extracted_stems=cache_item.get("stems"),
+            show_lyrics=show_lyrics,
         )
 
         manifest_dict = manifest.to_dict()
 
-        # 2. Trigger Remotion render on port 4001 with live progress polling
+        # 2. Trigger Remotion render strictly on GPU renderer
+        from bot.services.vast_lifecycle import VastLifecycleManager
+        mgr = VastLifecycleManager.get_instance()
+        gpu_ready = await mgr.ensure_gpu_ready()
+        if not gpu_ready:
+            raise RuntimeError("GPU instance failed to wake up within 5 minutes for Remotion rendering.")
+
         total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
         rendered_mp4 = None
         async with aiohttp.ClientSession() as session:
+            # Upload master audio to GPU renderer via HTTP tunnel
+            master_audio = manifest_dict.get("audio", {}).get("masterUri")
+            if master_audio and os.path.exists(master_audio):
+                upload_url = f"{RENDERER_URL}/upload?path={quote(master_audio)}"
+                logger.info(f"📤 Uploading audio to GPU renderer via tunnel: {master_audio}")
+                with open(master_audio, "rb") as f:
+                    async with session.post(
+                        upload_url,
+                        data=f,
+                        headers={"Content-Type": "application/octet-stream"},
+                        timeout=aiohttp.ClientTimeout(total=180),
+                    ) as up_resp:
+                        if up_resp.status != 200:
+                            err_txt = await up_resp.text()
+                            raise RuntimeError(f"Failed to upload audio to render server: {err_txt}")
+
             # Trigger render in async job mode
             async with session.post(
                 f"{RENDERER_URL}/render",
@@ -256,7 +355,21 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                         job_info = await status_resp.json()
                         st = job_info.get("status")
                         if st == "done":
-                            rendered_mp4 = job_info.get("path")
+                            local_dest = os.path.join("/tmp/audioviz_work", f"{job_id}.mp4")
+                            os.makedirs("/tmp/audioviz_work", exist_ok=True)
+                            dl_url = f"{RENDERER_URL}/download/{job_id}"
+                            logger.info(f"📥 Downloading rendered MP4 from GPU: {dl_url}...")
+                            async with session.get(dl_url, timeout=aiohttp.ClientTimeout(total=600)) as dl_resp:
+                                if dl_resp.status != 200:
+                                    raise RuntimeError(f"Failed to download rendered video ({dl_resp.status})")
+                                with open(local_dest, "wb") as out_f:
+                                    while True:
+                                        chunk = await dl_resp.content.read(1024 * 1024)
+                                        if not chunk:
+                                            break
+                                        out_f.write(chunk)
+                            rendered_mp4 = local_dest
+                            logger.info(f"✅ Rendered MP4 retrieved ({os.path.getsize(rendered_mp4) / (1024*1024):.1f}MB)")
                             break
                         elif st == "error":
                             render_error = job_info.get("error") or "Unknown render server failure"
@@ -397,10 +510,34 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
         cache_item["words"] = patched_words
         await message.answer(f"✅ اصلاح شد: «{old_word}» → «{new_word}»")
     else:
-        # Full text replacement aligned to existing audio timestamps
-        realigned = realign_transcript(orig_words, text)
+        # Full text replacement aligned to acoustic audio timestamps
+        from bot.services.audio_features import get_audio_duration_seconds
+        from bot.services.audio_adapter import AudioIntelligenceAdapter
+        audio_p = cache_item.get("audio_path", "")
+        vocal_p = cache_item.get("vocal_path")
+        target_audio = vocal_p if vocal_p and os.path.exists(vocal_p) else audio_p
+        total_dur = get_audio_duration_seconds(audio_p) if audio_p and os.path.exists(audio_p) else 0.0
+
+        ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL")
+        realigned = []
+        if ai_url and target_audio and os.path.exists(target_audio):
+            try:
+                gpu_align = await AudioIntelligenceAdapter.align_lyrics_gpu(
+                    target_audio, text, ai_url, language="fa", total_duration=total_dur
+                )
+                realigned = gpu_align.get("words", [])
+            except Exception as e:
+                logger.info(f"Remote GPU forced alignment failed, falling back to local: {e}")
+
+        if not realigned:
+            realigned = realign_transcript(orig_words, text, total_duration=total_dur)
+
         cache_item["words"] = realigned
-        await message.answer("✅ کل متن ترانه به‌روزرسانی و با زمان‌بندی صوت همگام‌سازی شد.")
+        has_interpolated = any(w.get("is_interpolated", False) for w in realigned)
+        if has_interpolated:
+            await message.answer("⚠️ متن ترانه به‌روزرسانی شد. توجه: بخش‌هایی از کلمات جدید بدون تطابق آکوستیک دقیق تخمین زده شده‌اند.")
+        else:
+            await message.answer("✅ کل متن ترانه به‌روزرسانی و با زمان‌بندی دقیق آکوستیک همگام‌سازی شد.")
 
     # Re-display style selection with updated lyrics
     updated_words = cache_item.get("words", [])

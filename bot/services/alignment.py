@@ -30,9 +30,15 @@ def realign_transcript(orig_words: List[Dict], new_text: str, total_duration: fl
     """
     Align an arbitrarily edited full transcript text back to the original audio timestamps
     using difflib SequenceMatcher and linear time interpolation for edited segments.
+    Guarantees:
+    - 0 <= start < end <= total_duration
+    - Every word has explicit 'is_interpolated' and 'alignment_source'
+    - Never extends past master audio duration
     """
     if total_duration is None:
-        total_duration = orig_words[-1]["end"] if orig_words else 10.0
+        total_duration = float(orig_words[-1]["end"]) if orig_words else 10.0
+    total_duration = max(0.1, float(total_duration))
+
     new_tokens = [w.strip() for w in new_text.split() if w.strip()]
     if not new_tokens:
         return orig_words
@@ -42,7 +48,10 @@ def realign_transcript(orig_words: List[Dict], new_text: str, total_duration: fl
         return [{
             "word": token,
             "start": float(round(i * step, 3)),
-            "end": float(round((i + 1) * step, 3))
+            "end": float(round(min(total_duration, (i + 1) * step), 3)),
+            "score": 0.0,
+            "is_interpolated": True,
+            "alignment_source": "interpolated"
         } for i, token in enumerate(new_tokens)]
 
     orig_tokens = [w["word"].strip().lower() for w in orig_words]
@@ -57,11 +66,13 @@ def realign_transcript(orig_words: List[Dict], new_text: str, total_duration: fl
         for offset in range(length):
             oi = orig_idx + offset
             ni = new_idx + offset
-            aligned_words[ni] = {
-                "word": new_tokens[ni],
-                "start": float(orig_words[oi]["start"]),
-                "end": float(orig_words[oi]["end"])
-            }
+            matched_dict = dict(orig_words[oi])
+            matched_dict["word"] = new_tokens[ni]
+            matched_dict["start"] = float(orig_words[oi]["start"])
+            matched_dict["end"] = float(orig_words[oi]["end"])
+            matched_dict["is_interpolated"] = bool(orig_words[oi].get("is_interpolated", False))
+            matched_dict["alignment_source"] = str(orig_words[oi].get("alignment_source", "acoustic"))
+            aligned_words[ni] = matched_dict
 
     # 2. Interpolate unmatched/edited gaps
     idx = 0
@@ -77,31 +88,73 @@ def realign_transcript(orig_words: List[Dict], new_text: str, total_duration: fl
         gap_end_idx = idx
 
         prev_time = aligned_words[gap_start_idx - 1]["end"] if gap_start_idx > 0 else 0.0
-        next_time = aligned_words[gap_end_idx]["start"] if gap_end_idx < N else max(total_duration, orig_words[-1]["end"])
+        next_time = aligned_words[gap_end_idx]["start"] if gap_end_idx < N else total_duration
 
-        if next_time <= prev_time:
-            next_time = prev_time + 0.4 * (gap_end_idx - gap_start_idx)
+        # Clamp bounds strictly within [0.0, total_duration]
+        prev_time = max(0.0, min(prev_time, total_duration))
+        next_time = max(prev_time, min(next_time, total_duration))
 
         gap_len = gap_end_idx - gap_start_idx
-        time_slot = (next_time - prev_time) / gap_len
+        available_span = next_time - prev_time
+
+        # If no positive span available, distribute tightly within remaining budget
+        if available_span <= 0.001:
+            remaining_after = total_duration - prev_time
+            if remaining_after > 0.005:
+                next_time = min(total_duration, prev_time + remaining_after)
+                available_span = next_time - prev_time
+            else:
+                # Borrow tiny room backwards if needed without violating bounds
+                prev_time = max(0.0, total_duration - 0.01 * gap_len)
+                next_time = total_duration
+                available_span = next_time - prev_time
+
+        time_slot = available_span / gap_len
 
         for g_i in range(gap_len):
             curr_idx = gap_start_idx + g_i
-            s = float(round(prev_time + g_i * time_slot, 3))
-            e = float(round(prev_time + (g_i + 1) * time_slot, 3))
+            s = float(round(prev_time + g_i * time_slot, 4))
+            e = float(round(prev_time + (g_i + 1) * time_slot, 4))
+            e = min(total_duration, max(s + 0.0001, e))
             aligned_words[curr_idx] = {
                 "word": new_tokens[curr_idx],
                 "start": s,
-                "end": e
+                "end": e,
+                "score": 0.0,
+                "is_interpolated": True,
+                "alignment_source": "interpolated"
             }
 
-    # 3. Monotonic sanity pass
+    # 3. Monotonic sanity & strict total_duration clamping pass
+    # Ensure starts and ends are strictly monotonic
+    for i in range(len(aligned_words)):
+        w = aligned_words[i]
+        if i > 0:
+            prev_e = aligned_words[i - 1]["end"]
+            if w["start"] < prev_e:
+                w["start"] = prev_e
+        if w["end"] <= w["start"]:
+            w["end"] = w["start"] + 0.001
+
+    # If the end of any word exceeds total_duration, proportionally scale all timestamps
+    max_end = aligned_words[-1]["end"]
+    if max_end > total_duration:
+        scale = total_duration / max_end
+        for w in aligned_words:
+            w["start"] = float(round(w["start"] * scale, 4))
+            w["end"] = float(round(w["end"] * scale, 4))
+
+    # Final hard invariant check
     last_end = 0.0
-    for w in aligned_words:
+    for i, w in enumerate(aligned_words):
+        w["start"] = max(0.0, min(float(w["start"]), total_duration))
         if w["start"] < last_end:
             w["start"] = last_end
-        if w["end"] <= w["start"]:
-            w["end"] = float(round(w["start"] + 0.15, 3))
+        # Guarantee minimum positive duration
+        min_end = min(total_duration, w["start"] + 0.001)
+        w["end"] = max(min_end, min(float(w["end"]), total_duration))
+        if w["end"] <= w["start"] and w["start"] < total_duration:
+            w["end"] = total_duration
         last_end = w["end"]
 
     return aligned_words

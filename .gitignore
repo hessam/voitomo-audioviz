@@ -1,7 +1,13 @@
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.pytest_cache/
 
 # Virtual environments
 .venv/
@@ -13,10 +19,15 @@ node_modules/
 /tmp/
 *.log
 .DS_Store
+dist/
+build/
+.cache/
 
 # Output renders & audio caches
 *.mp4
 *.wav
 *.ogg
+*.mp3
 logs/
 renderer/rendered_particle_sphere.png
+rendered_*.png

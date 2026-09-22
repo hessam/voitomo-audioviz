@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-ALLOWED_USERS = set(int(x) for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "92241363").split(","))
+ALLOWED_USERS = set(int(x.strip()) for x in os.environ.get("TELEGRAM_ALLOWED_USERS", "").split(",") if x.strip().isdigit())
 
 class AuthMiddleware(BaseMiddleware):
     async def __call__(self, handler: Callable, event: TelegramObject, data: Dict[str, Any]) -> Any:

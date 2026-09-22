@@ -48,13 +48,14 @@ def normalize_persian_asr(raw_text: str, words: List[Dict]) -> Tuple[str, List[D
     # Clean redundant spaces
     clean_text = re.sub(r"[ \t]+", " ", clean_text).strip()
 
-    # Apply token-level corrections preserving timestamps
+    # Apply token-level corrections preserving timestamps and metadata
     clean_words = []
     for w in words:
         orig_w = w["word"]
         new_w = clean_persian_token(orig_w).strip()
         if new_w:
             clean_words.append({
+                **w,
                 "word": new_w,
                 "start": w["start"],
                 "end": w["end"]

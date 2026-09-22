@@ -41,116 +41,113 @@ class AudioIntelligenceAdapter:
     """
 
     @staticmethod
+    async def separate_stems_gpu(audio_path: str, ai_url: str) -> Dict[str, str]:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            logger.info(f"🚀 Offloading stem separation to GPU at {ai_url}/ai/separate-stems (UVR-MDX-NET CUDA)...")
+            data = aiohttp.FormData()
+            with open(audio_path, "rb") as f:
+                data.add_field("file", f.read(), filename=os.path.basename(audio_path), content_type="audio/wav")
+            async with session.post(f"{ai_url}/ai/separate-stems", data=data, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"GPU separation error ({resp.status}): {text}")
+                res = await resp.json()
+                if res.get("status") != "success":
+                    raise RuntimeError(f"GPU separation failed: {res.get('detail') or res.get('error')}")
+                
+                job_id = res.get("job_id")
+                stems_urls = res.get("stems", {})
+                logger.info(f"⚡ GPU stems ready in {res.get('elapsed_seconds')}s. Downloading isolated stems...")
+                
+                cache_dir = tempfile.mkdtemp(prefix=f"audioviz_gpu_stems_{job_id}_")
+                local_stems = {}
+                for stem_type, stem_rel_url in stems_urls.items():
+                    download_url = f"{ai_url}{stem_rel_url}" if stem_rel_url.startswith("/") else f"{ai_url}/{stem_rel_url}"
+                    dest_file = os.path.join(cache_dir, f"{stem_type}.wav")
+                    async with session.get(download_url) as stem_resp:
+                        if stem_resp.status == 200:
+                            with open(dest_file, "wb") as df:
+                                while True:
+                                    chunk = await stem_resp.content.read(65536)
+                                    if not chunk:
+                                        break
+                                    df.write(chunk)
+                            local_stems[stem_type] = dest_file
+                return local_stems
+
+    @staticmethod
+    async def align_lyrics_gpu(
+        audio_path: str,
+        lyrics_text: str,
+        ai_url: str,
+        language: str = "fa",
+        total_duration: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Forced-aligns lyrics text against audio using Vast GPU (/ai/align).
+        Returns dict with 'words', 'alignment_score', 'duration', etc.
+        """
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            logger.info(f"🚀 Offloading acoustic lyric forced alignment to GPU at {ai_url}/ai/align...")
+            data = aiohttp.FormData()
+            with open(audio_path, "rb") as f:
+                data.add_field("file", f.read(), filename=os.path.basename(audio_path), content_type="audio/wav")
+            data.add_field("text", lyrics_text)
+            data.add_field("language", language)
+            if total_duration:
+                data.add_field("total_duration", str(total_duration))
+            async with session.post(f"{ai_url}/ai/align", data=data, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"GPU forced alignment error ({resp.status}): {text}")
+                res = await resp.json()
+                if res.get("status") != "success":
+                    raise RuntimeError(f"GPU alignment failed: {res.get('detail') or res.get('error')}")
+                logger.info(f"⚡ GPU alignment completed in {res.get('elapsed_seconds')}s: {len(res.get('words', []))} words")
+                return res
+
+    @staticmethod
     async def separate_stems_broker(
         audio_path: str,
-        timeout_seconds: int = 1800,
+        timeout_seconds: int = 300,
+        status_callback=None,
         chat_id: int = 0,
         message_id: int = 0,
     ) -> Dict[str, str]:
         """
-        Delegates stem separation to hermes-audio-engineer-sandbox via host broker.
-        Allows full high-fidelity neural processing without artificial short timeouts.
-        Returns dict with paths to 'vocals', 'instrumental' (or 'bass'/'drums' if present).
-        Falls back gracefully if broker is offline or timed out.
+        Delegates stem separation EXCLUSIVELY to GPU running Mel-Band RoFormer.
+        Waits up to 5 minutes (300s) for GPU wake-up.
+        Zero Hetzner CPU processing, zero local FFmpeg bandpass fallback.
+        Raises RuntimeError if GPU fails to wake or execute.
         """
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Input audio file not found: {audio_path}")
 
-        job_id = f"stems_{uuid.uuid4().hex[:10]}"
-        job_dir = os.path.join(AUDIOVIZ_BROKER_DIR, "jobs", job_id)
-        
-        # Check if broker directory exists
-        if not os.path.exists(AUDIOVIZ_BROKER_DIR):
-            logger.info(f"Broker dir {AUDIOVIZ_BROKER_DIR} not mounted, using local fallback.")
-            return {}
+        ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL") or "http://127.0.0.1:4002"
+
+        # Ensure GPU is awake and ready
+        from bot.services.vast_lifecycle import VastLifecycleManager
+        mgr = VastLifecycleManager.get_instance()
+        gpu_ready = await mgr.ensure_gpu_ready(status_callback=status_callback)
+        if not gpu_ready:
+            raise RuntimeError(
+                "❌ Vast GPU instance failed to wake up within 5 minutes (300s).\n"
+                "Mel-Band RoFormer requires dedicated GPU. Hetzner CPU fallback is strictly disabled."
+            )
+
+        if status_callback:
+            await status_callback("🎙 **Processing stems with Mel-Band RoFormer on GPU...**")
 
         try:
-            os.makedirs(job_dir, exist_ok=True)
-            input_dest = os.path.join(job_dir, "input.wav")
-            shutil.copy2(audio_path, input_dest)
-
-            trigger_payload = {
-                "job_id": job_id,
-                "action": "separate_stems",
-                "audio_filename": "input.wav"
-            }
-            with open(os.path.join(job_dir, "trigger.json"), "w") as f:
-                json.dump(trigger_payload, f)
-
-            # --- RESURRECTION ANCHOR ---
-            # Write caller identity BEFORE we start polling.
-            # If this process is killed mid-wait, the restart scan finds this
-            # file, sees result.json exists, and re-delivers the result.
-            claim_path = os.path.join(job_dir, _CLAIM_FILE)
-            claim = {
-                "job_id": job_id,
-                "submitted_at": time.time(),
-                "chat_id": chat_id,
-                "message_id": message_id,
-            }
-            with open(claim_path, "w") as f:
-                json.dump(claim, f)
-
-            logger.info(f"🚀 Sent stem separation job {job_id} to host broker...")
-            result_file = os.path.join(job_dir, "result.json")
-            output_dir = os.path.join(job_dir, "output")
-
-            start_time = asyncio.get_event_loop().time()
-            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
-                if os.path.exists(result_file):
-                    break
-                await asyncio.sleep(0.5)
-
-            if not os.path.exists(result_file):
-                logger.warning(f"Stem separation job {job_id} timed out after {timeout_seconds}s.")
-                return {}
-
-            with open(result_file, "r") as f:
-                res_data = json.load(f)
-
-            if res_data.get("status") != "success":
-                logger.warning(f"Stem separation job {job_id} failed: {res_data.get('error')}")
-                return {}
-
-            stems: Dict[str, str] = {}
-            if os.path.exists(output_dir):
-                # Copy isolated stems to persistent safe cache dir
-                cache_dir = tempfile.mkdtemp(prefix=f"audioviz_stems_{job_id}_")
-                for fname in os.listdir(output_dir):
-                    fpath = os.path.join(output_dir, fname)
-                    dest_path = os.path.join(cache_dir, fname)
-                    shutil.copy2(fpath, dest_path)
-                    lower_name = fname.lower()
-                    if "vocal" in lower_name:
-                        stems["vocals"] = dest_path
-                    elif "instrumental" in lower_name or "no_vocals" in lower_name:
-                        stems["instrumental"] = dest_path
-                    elif "bass" in lower_name:
-                        stems["bass"] = dest_path
-                    elif "drum" in lower_name:
-                        stems["drums"] = dest_path
-                    elif "other" in lower_name:
-                        stems["other"] = dest_path
-
-            logger.info(f"✨ Stem separation completed successfully: {list(stems.keys())}")
-            return stems
-
+            gpu_stems = await AudioIntelligenceAdapter.separate_stems_gpu(audio_path, ai_url)
+            if not gpu_stems or not gpu_stems.get("vocals"):
+                raise RuntimeError("GPU Mel-Band RoFormer returned empty stems.")
+            return gpu_stems
         except Exception as e:
-            logger.warning(f"Broker stem separation error: {e}")
-            return {}
-        finally:
-            # Remove claim file so resurrection scan ignores completed jobs
-            try:
-                claim_path = os.path.join(job_dir, _CLAIM_FILE)
-                if os.path.exists(claim_path):
-                    os.remove(claim_path)
-            except Exception:
-                pass
-            try:
-                if os.path.exists(job_dir):
-                    shutil.rmtree(job_dir, ignore_errors=True)
-            except Exception:
-                pass
+            logger.error(f"GPU Mel-Band RoFormer separation error: {e}")
+            raise RuntimeError(f"GPU Mel-Band RoFormer stem separation failed: {e}")
 
     @staticmethod
     def collect_orphaned_stem_jobs() -> List[Tuple[str, int, int, Dict[str, str]]]:
@@ -295,37 +292,24 @@ class AudioIntelligenceAdapter:
                 pass
 
     @staticmethod
-    async def separate_vocals(audio_path: str, timeout_seconds: int = 1800) -> str:
+    async def separate_vocals(audio_path: str, timeout_seconds: int = 300, status_callback=None) -> str:
         """
         Extracts dry vocal stem from a song.
-        Uses Mel-Band RoFormer via Broker; falls back to spectral center-channel isolation.
+        Strictly requires Mel-Band RoFormer on GPU. Zero CPU bandpass fallback.
         """
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Input audio file not found: {audio_path}")
 
-        # 1. Attempt broker stem separation
-        try:
-            stems = await AudioIntelligenceAdapter.separate_stems_broker(audio_path, timeout_seconds=timeout_seconds)
-            if stems.get("vocals") and os.path.exists(stems["vocals"]):
-                logger.info(f"🎙 Isolated dry vocals via Mel-Band RoFormer: {stems['vocals']}")
-                return stems["vocals"]
-        except Exception as e:
-            logger.info(f"Broker stem separation bypassed ({e}), using local acoustic vocal extraction.")
-
-        # 2. Resilient local fallback: Bandpass vocal formant extraction via FFmpeg
-        out_vocal = tempfile.NamedTemporaryFile(suffix="_vocals.wav", delete=False).name
-        try:
-            cmd = [
-                "ffmpeg", "-y", "-i", audio_path,
-                "-af", "highpass=f=180,lowpass=f=4500,acompressor=threshold=-18dB:ratio=4:attack=15:release=100",
-                "-ar", "16000", "-ac", "1", out_vocal
-            ]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            logger.info(f"🎙 Generated local formant-filtered vocal stem: {out_vocal}")
-            return out_vocal
-        except Exception as fallback_err:
-            logger.warning(f"Vocal filtering failed ({fallback_err}), proceeding with original audio.")
-            return audio_path
+        stems = await AudioIntelligenceAdapter.separate_stems_broker(
+            audio_path,
+            timeout_seconds=timeout_seconds,
+            status_callback=status_callback
+        )
+        vocal_path = stems.get("vocals")
+        if not vocal_path or not os.path.exists(vocal_path):
+            raise RuntimeError("Mel-Band RoFormer failed to extract vocal stem on GPU.")
+        logger.info(f"🎙 Isolated dry vocals via Mel-Band RoFormer: {vocal_path}")
+        return vocal_path
 
     @staticmethod
     def extract_rhythm_and_beats(audio_path: str, fps: int = 30) -> Dict[str, Any]:

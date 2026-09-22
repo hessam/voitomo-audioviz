@@ -7,10 +7,7 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_API_KEY = os.environ.get(
-    "OPENROUTER_API_KEY",
-    ""
-)
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 LLM_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
 
 def snap_to_nearest_beat(frame: int, beat_frames: List[int], tolerance_frames: int = 15) -> int:

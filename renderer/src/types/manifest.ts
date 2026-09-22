@@ -32,11 +32,22 @@ export interface AudioMultibandFeatures {
   musicalKey?: string;
 }
 
+export interface LyricWord {
+  word: string;
+  startFrame: number;
+  endFrame: number;
+  score?: number;
+  isInterpolated?: boolean;
+  alignmentSource?: string;
+}
+
 export interface LyricLine {
   text: string;
   startFrame: number;
   endFrame: number;
   isHero?: boolean;
+  confidence?: number;
+  words?: LyricWord[];
 }
 
 export interface RenderManifest {

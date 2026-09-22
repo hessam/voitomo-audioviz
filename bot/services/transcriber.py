@@ -10,10 +10,7 @@ logger = logging.getLogger(__name__)
 
 _model = None
 
-OPENROUTER_API_KEY = os.environ.get(
-    "OPENROUTER_API_KEY",
-    ""
-)
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 LLM_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
 
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "medium")

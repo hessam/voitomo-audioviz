@@ -24,11 +24,23 @@ class AudioMultibandFeatures:
 
 
 @dataclass
+class LyricWord:
+    word: str = ""
+    startFrame: int = 0
+    endFrame: int = 0
+    score: float = 1.0
+    isInterpolated: bool = False
+    alignmentSource: str = "acoustic"
+
+
+@dataclass
 class LyricLine:
     text: str = ""
     startFrame: int = 0
     endFrame: int = 0
     isHero: bool = False
+    confidence: float = 1.0
+    words: List[LyricWord] = field(default_factory=list)
 
 
 @dataclass

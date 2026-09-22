@@ -6,6 +6,8 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { RenderInputError, validateDuration, validateManifest } from "./render_contract";
 import { prepareAudio } from "./render_audio";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -109,7 +111,88 @@ app.get("/render/jobs/:id", (req, res) => {
   res.json(job);
 });
 
+// HTTP file upload endpoint — replaces SCP for audio transfer
+app.post("/upload", (req, res) => {
+  const targetPath = req.query.path as string;
+  if (!targetPath) return res.status(400).json({ error: "path query param required" });
+  const dir = path.dirname(targetPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const ws = fs.createWriteStream(targetPath);
+  req.pipe(ws);
+  ws.on("finish", () => res.json({ ok: true, path: targetPath, size: ws.bytesWritten }));
+  ws.on("error", (err) => res.status(500).json({ error: err.message }));
+});
+
+// HTTP file download endpoint — replaces SCP for MP4 retrieval
+app.get("/download/:jobId", (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job || job.status !== "done" || !job.path) return res.status(404).json({ error: "Job not done" });
+  res.sendFile(job.path);
+});
+
+async function delegateRenderToRemote(jobId: string, body: any, remoteUrl: string): Promise<string> {
+  const masterUri = body?.manifest?.audio?.masterUri ?? body?.audioSrc;
+  const job = jobs.get(jobId);
+  if (job) { job.status = "rendering"; job.startedAt = Date.now(); }
+
+  // Upload audio via HTTP through tunnel (replaces transatlantic SCP)
+  if (masterUri && fs.existsSync(masterUri)) {
+    const uploadUrl = `${remoteUrl}/upload?path=${encodeURIComponent(masterUri)}`;
+    const fileStream = fs.createReadStream(masterUri);
+    const stat = fs.statSync(masterUri);
+    const uploadResp = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "Content-Length": String(stat.size) },
+      body: fileStream as any,
+      // @ts-ignore duplex required for streaming body in Node 20
+      duplex: "half",
+    } as any);
+    if (!uploadResp.ok) throw new Error(`Audio upload failed: ${await uploadResp.text()}`);
+    console.log(`📤 Audio uploaded via HTTP tunnel (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
+  }
+
+  const postResp = await fetch(`${remoteUrl}/render`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, jobId, async: true }),
+  });
+  if (!postResp.ok) throw new Error(`Remote start failed: ${await postResp.text()}`);
+  const localOut = path.join(OUT_DIR, `render-${randomUUID()}.mp4`);
+  while (true) {
+    await new Promise(r => setTimeout(r, 2000));
+    const sResp = await fetch(`${remoteUrl}/render/jobs/${jobId}`);
+    if (!sResp.ok) continue;
+    const rJob: any = await sResp.json();
+    if (job) {
+      job.percent = rJob.percent || 0;
+      job.renderedFrames = rJob.renderedFrames || 0;
+      job.totalFrames = rJob.totalFrames || 0;
+      job.etaSeconds = rJob.etaSeconds || 0;
+    }
+    if (rJob.status === "done") {
+      // Download MP4 via HTTP through tunnel (replaces transatlantic SCP)
+      const dlResp = await fetch(`${remoteUrl}/download/${jobId}`);
+      if (!dlResp.ok) throw new Error(`Download failed: ${dlResp.status}`);
+      const fileWs = fs.createWriteStream(localOut);
+      await pipeline(Readable.fromWeb(dlResp.body as any), fileWs);
+      console.log(`📥 MP4 downloaded via HTTP tunnel (${(fs.statSync(localOut).size / 1024 / 1024).toFixed(1)}MB)`);
+      if (job) { job.status = "done"; job.path = localOut; }
+      return localOut;
+    } else if (rJob.status === "error") {
+      throw new Error(rJob.error || "Remote render error");
+    }
+  }
+}
+
 async function runRenderJob(jobId: string, body: any): Promise<string> {
+  if (process.env.REMOTE_RENDERER_URL) {
+    try {
+      return await delegateRenderToRemote(jobId, body, process.env.REMOTE_RENDERER_URL);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`⚠️ Remote render failed (${msg}). Falling back to local engine...`);
+    }
+  }
   const { manifest, scenes, words, text, audioSrc, durationInFrames, profile: profileKey = "swiss_clean", creativeSpec } = body || {};
 
   if (!manifest && !creativeSpec && (!words || !Array.isArray(words)) && (!scenes || !Array.isArray(scenes))) {
@@ -249,6 +332,39 @@ async function runRenderJob(jobId: string, body: any): Promise<string> {
   }
 }
 
+app.all("/ai/*", async (req, res) => {
+  try {
+    const targetUrl = `http://127.0.0.1:5001${req.originalUrl}`;
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (v && typeof v === "string" && k.toLowerCase() !== "host") {
+        headers[k] = v;
+      }
+    }
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : (Readable.toWeb(req) as any),
+      // @ts-ignore
+      duplex: "half",
+    });
+    res.status(response.status);
+    response.headers.forEach((val, key) => {
+      res.setHeader(key, val);
+    });
+    if (response.body) {
+      // @ts-ignore
+      const nodeStream = Readable.fromWeb(response.body);
+      nodeStream.pipe(res);
+    } else {
+      res.end();
+    }
+  } catch (err: any) {
+    console.error("AI Proxy error:", err);
+    res.status(502).json({ error: "AI service error", details: err?.message });
+  }
+});
+
 app.post("/render", async (req, res) => {
   const isAsync = req.body?.async === true;
   const jobId = req.body?.jobId || randomUUID();
@@ -265,7 +381,15 @@ app.post("/render", async (req, res) => {
 
   if (isAsync) {
     // Return job identifier immediately for progress polling
-    runRenderJob(jobId, req.body).catch(() => {});
+    runRenderJob(jobId, req.body).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`❌ Async render job failed [${jobId}]: ${msg}`);
+      const j = jobs.get(jobId);
+      if (j) {
+        j.status = "error";
+        j.error = msg;
+      }
+    });
     return res.json({ jobId, status: "queued" });
   }
 

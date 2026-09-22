@@ -17,6 +17,7 @@ from contracts.manifest import (
     AudioMultibandFeatures,
     LyricsConfig,
     LyricLine,
+    LyricWord,
     VisualizerPresetId,
 )
 from bot.services.audio_adapter import AudioIntelligenceAdapter
@@ -192,6 +193,99 @@ def extract_multiband_features_ffmpeg(
     )
 
 
+def group_words_into_phrases(
+    words: List[Dict[str, Any]],
+    fps: int = 30,
+    pause_threshold_sec: float = 0.5,
+    max_words_per_phrase: int = 6,
+) -> List[LyricLine]:
+    """
+    Groups aligned words into coherent visual phrases (LyricLines) using:
+    1. Acoustic pause detection (split when gap between words >= pause_threshold_sec)
+    2. Punctuation boundaries (split on '.', '!', '؟', '?', '،', ',')
+    3. Natural phrase length limit (max_words_per_phrase)
+    4. Preserves word-level timing, confidence score, and interpolation flags.
+    """
+    if not words or not isinstance(words, list):
+        return []
+
+    phrases: List[LyricLine] = []
+    current_words: List[LyricWord] = []
+    current_raw_words: List[str] = []
+    prev_end_sec: Optional[float] = None
+
+    def flush_phrase():
+        nonlocal current_words, current_raw_words, prev_end_sec
+        if not current_words:
+            return
+        line_text = " ".join(current_raw_words).strip()
+        if line_text:
+            start_f = min(w.startFrame for w in current_words)
+            end_f = max(w.endFrame for w in current_words)
+            if end_f <= start_f:
+                end_f = start_f + 4
+            scores = [w.score for w in current_words if w.score is not None]
+            avg_score = sum(scores) / len(scores) if scores else 1.0
+            phrases.append(
+                LyricLine(
+                    text=line_text,
+                    startFrame=start_f,
+                    endFrame=end_f,
+                    isHero=(len(line_text) > 15),
+                    confidence=round(avg_score, 3),
+                    words=list(current_words),
+                )
+            )
+        current_words = []
+        current_raw_words = []
+
+    for w in words:
+        w_text = str(w.get("word", "")).strip()
+        if not w_text:
+            continue
+        try:
+            w_start_sec = float(w.get("start", 0.0))
+            w_end_sec = float(w.get("end", w_start_sec + 0.3))
+        except (ValueError, TypeError):
+            continue
+
+        if w_end_sec <= w_start_sec:
+            w_end_sec = w_start_sec + 0.1
+
+        # Pause detection: acoustic gap since previous word end
+        is_pause = (prev_end_sec is not None) and ((w_start_sec - prev_end_sec) >= pause_threshold_sec)
+        is_length_exceeded = len(current_raw_words) >= max_words_per_phrase
+
+        if is_pause or is_length_exceeded:
+            flush_phrase()
+
+        w_start_frame = int(round(w_start_sec * fps))
+        w_end_frame = max(w_start_frame + 1, int(round(w_end_sec * fps)))
+        w_score = float(w.get("score", 1.0))
+        w_interp = bool(w.get("is_interpolated", False))
+        w_src = str(w.get("alignment_source", "acoustic"))
+
+        current_words.append(
+            LyricWord(
+                word=w_text,
+                startFrame=w_start_frame,
+                endFrame=w_end_frame,
+                score=w_score,
+                isInterpolated=w_interp,
+                alignmentSource=w_src,
+            )
+        )
+        current_raw_words.append(w_text)
+        prev_end_sec = w_end_sec
+
+        # Punctuation check: split after punctuation
+        if w_text.endswith((".", "!", "؟", "?", "،", ",")):
+            flush_phrase()
+
+    flush_phrase()
+    return phrases
+
+
 class AudioFeatureExtractor:
     """
     Compiles an Astra-compliant immutable Pre-Render Manifest.
@@ -212,6 +306,8 @@ class AudioFeatureExtractor:
         seed: int = 42,
         chat_id: int = 0,
         message_id: int = 0,
+        pre_extracted_stems: Optional[Dict[str, str]] = None,
+        show_lyrics: bool = True,
     ) -> RenderManifest:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -221,27 +317,34 @@ class AudioFeatureExtractor:
         total_frames = max(30, int(round(duration_sec * fps)))
         audio_hash = compute_sha256(audio_path)
 
-        # 1. Attempt stem extraction via Audio Intelligence Adapter
+        # 1. Attempt stem extraction via Audio Intelligence Adapter or reuse pre-extracted stems
         vocal_stem_path: Optional[str] = None
         bass_stem_path: Optional[str] = None
         drums_stem_path: Optional[str] = None
         other_stem_path: Optional[str] = None
         dna_data: Optional[Dict[str, Any]] = None
 
-        try:
-            stems = await AudioIntelligenceAdapter.separate_stems_broker(
-                audio_path,
-                chat_id=chat_id,
-                message_id=message_id,
-            )
-            vocal_stem_path = stems.get("vocals")
-            bass_stem_path = stems.get("bass")
-            drums_stem_path = stems.get("drums")
-            other_stem_path = stems.get("other") or stems.get("instrumental")
-            if not vocal_stem_path:
-                vocal_stem_path = await AudioIntelligenceAdapter.separate_vocals(audio_path)
-        except Exception as e:
-            logger.info(f"Stem separation skipped: {e}")
+        if pre_extracted_stems and isinstance(pre_extracted_stems, dict):
+            vocal_stem_path = pre_extracted_stems.get("vocals")
+            bass_stem_path = pre_extracted_stems.get("bass")
+            drums_stem_path = pre_extracted_stems.get("drums")
+            other_stem_path = pre_extracted_stems.get("other") or pre_extracted_stems.get("instrumental")
+            logger.info(f"⚡ Reusing pre-extracted stems: {list(pre_extracted_stems.keys())}")
+        else:
+            try:
+                stems = await AudioIntelligenceAdapter.separate_stems_broker(
+                    audio_path,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                )
+                vocal_stem_path = stems.get("vocals")
+                bass_stem_path = stems.get("bass")
+                drums_stem_path = stems.get("drums")
+                other_stem_path = stems.get("other") or stems.get("instrumental")
+                if not vocal_stem_path:
+                    vocal_stem_path = await AudioIntelligenceAdapter.separate_vocals(audio_path)
+            except Exception as e:
+                logger.info(f"Stem separation skipped: {e}")
 
         # 2. Attempt Music DNA extraction via Audio Intelligence Adapter
         try:
@@ -262,8 +365,8 @@ class AudioFeatureExtractor:
         )
 
         # 3. Format Whisper words into 30 FPS clamped LyricLines
-        # If words is empty or missing, run lyric transcription on isolated vocal stem
-        if (not words or len(words) == 0) and vocal_stem_path and os.path.exists(vocal_stem_path):
+        # If words is empty or missing, run lyric transcription on isolated vocal stem ONLY if show_lyrics is True
+        if show_lyrics and (not words or len(words) == 0) and vocal_stem_path and os.path.exists(vocal_stem_path):
             try:
                 from bot.services.lyric_transcriber import transcribe_lyrics
                 logger.info(f"🎙 Running singing transcription on isolated vocal stem: {vocal_stem_path}")
@@ -274,76 +377,42 @@ class AudioFeatureExtractor:
                 logger.info(f"Fallback vocal lyric transcription skipped: {e}")
 
         lyric_lines: List[LyricLine] = []
-        if words and isinstance(words, list):
-            # Group words into clean sequential lines (3 to 6 words per line)
-            current_line_words = []
-            current_start_frame = 0
-            current_end_frame = 0
-
-            for w in words:
-                w_text = w.get("word", "").strip()
-                if not w_text:
-                    continue
-                w_start = float(w.get("start", 0.0))
-                w_end = float(w.get("end", w_start + 0.3))
-
-                w_start_frame = int(round(w_start * fps))
-                w_end_frame = int(round(w_end * fps))
-
-                if not current_line_words:
-                    current_start_frame = w_start_frame
-
-                current_line_words.append(w_text)
-                current_end_frame = max(current_end_frame, w_end_frame)
-
-                # Line break condition: punctuation, pause > 0.6s, or 5 words
-                if len(current_line_words) >= 5 or w_text.endswith((".", "!", "؟", "?", "،", ",")):
-                    line_text = " ".join(current_line_words)
-                    lyric_lines.append(
-                        LyricLine(
-                            text=line_text,
-                            startFrame=current_start_frame,
-                            endFrame=current_end_frame,
-                            isHero=(len(line_text) > 15),
-                        )
-                    )
-                    current_line_words = []
-
-            if current_line_words:
-                lyric_lines.append(
-                    LyricLine(
-                        text=" ".join(current_line_words),
-                        startFrame=current_start_frame,
-                        endFrame=current_end_frame,
-                        isHero=False,
-                    )
-                )
+        if show_lyrics and words and isinstance(words, list):
+            lyric_lines = group_words_into_phrases(
+                words,
+                fps=fps,
+                pause_threshold_sec=0.5,
+                max_words_per_phrase=6,
+            )
 
         # 4. Strict Sanitization Pass: Guarantee render_contract invariants for long songs
         sanitized_lyrics: List[LyricLine] = []
-        prev_start = -1
-        for l in lyric_lines:
-            text = l.text.strip()
-            if not text:
-                continue
-            start = max(0, l.startFrame)
-            if start <= prev_start:
-                start = prev_start + 1
-            if start >= total_frames - 2:
-                break
-            end = max(start + 4, l.endFrame)
-            end = min(end, total_frames)
-            if start >= end:
-                continue
-            sanitized_lyrics.append(
-                LyricLine(
-                    text=text,
-                    startFrame=start,
-                    endFrame=end,
-                    isHero=bool(l.isHero),
+        if show_lyrics:
+            prev_start = -1
+            for l in lyric_lines:
+                text = l.text.strip()
+                if not text:
+                    continue
+                start = max(0, l.startFrame)
+                if start <= prev_start:
+                    start = prev_start + 1
+                if start >= total_frames - 2:
+                    break
+                end = max(start + 4, l.endFrame)
+                end = min(end, total_frames)
+                if start >= end:
+                    continue
+                sanitized_lyrics.append(
+                    LyricLine(
+                        text=text,
+                        startFrame=start,
+                        endFrame=end,
+                        isHero=bool(l.isHero),
+                        confidence=float(getattr(l, "confidence", 1.0)),
+                        words=list(getattr(l, "words", [])),
+                    )
                 )
-            )
-            prev_start = start
+                prev_start = start
 
         # Sanitize event frame arrays (non-decreasing, non-negative, strictly < total_frames)
         features.transients = sorted(list(set(int(f) for f in features.transients if 0 <= f < total_frames)))

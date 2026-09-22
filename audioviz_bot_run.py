@@ -91,6 +91,11 @@ async def main():
     # Recover any stem jobs that completed while the bot was killed mid-wait
     await resurrect_orphaned_jobs(bot)
     try:
+        from bot.services.vast_lifecycle import VastLifecycleManager
+        VastLifecycleManager.get_instance().start_reaper()
+    except Exception as e:
+        logger.warning(f"Failed to start Vast idle reaper: {e}")
+    try:
         await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
     finally:
         try:

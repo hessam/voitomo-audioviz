@@ -166,6 +166,13 @@ class VastLifecycleManager:
         wake_res = await self._api_request("PUT", f"v0/instances/{inst_id}/", {"state": "running"})
         logger.info("Wake request response: %s", wake_res)
 
+        # Check for immediate resources_unavailable
+        if wake_res.get("error") == "resources_unavailable" or (wake_res.get("success") is False and "resource" in str(wake_res).lower()):
+            logger.warning("⚠️ Host reports resources unavailable! Triggering dedicated EU GPU failover...")
+            if status_callback:
+                await status_callback("⚠️ Primary host slot occupied. Finding fresh dedicated EU GPU...")
+            return await self.failover_to_fresh_dedicated_gpu(inst_id, status_callback=status_callback)
+
         # Poll until running with open port (up to 300 seconds / 5 minutes)
         start_t = time.time()
         last_callback_t = start_t
@@ -189,7 +196,79 @@ class VastLifecycleManager:
                 if ready:
                     return True
 
+            # Automatic failover if primary host is contested or stalls past 45s
+            if elapsed > 45 and st != "running":
+                logger.warning(f"⚠️ GPU instance {inst_id} stalled in state {st} (>45s). Triggering auto-recovery...")
+                if status_callback:
+                    await status_callback("⚠️ GPU wake delayed beyond 45s. Triggering automatic failover...")
+                return await self.failover_to_fresh_dedicated_gpu(inst_id, status_callback=status_callback)
+
         logger.error(f"Failed to bring GPU instance {inst_id} online within 300s (5 minutes).")
+        return False
+
+    async def failover_to_fresh_dedicated_gpu(self, old_instance_id: Optional[int] = None, status_callback=None) -> bool:
+        """Finds a dedicated on-demand EU GPU, provisions it, destroys the old instance, and connects."""
+        logger.info("🔄 Initiating automatic failover for dedicated EU GPU...")
+        vast_bin = "/root/workspace/.venv/bin/vastai"
+        if not os.path.exists(vast_bin):
+            vast_bin = "vastai"
+
+        # Search top dedicated on-demand offer in EU
+        query = "rentable=true num_gpus=1 gpu_frac=1.0 gpu_ram>=12 dph<=0.35 geolocation in [DE,CZ,PL,FR,NL,ES,AT,CH,IT,SE,NO,FI,DK,BE,GB]"
+        cmd = [vast_bin, "search", "offers", "-d", "-n", query, "-o", "score-", "--raw"]
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, _ = await proc.communicate()
+        try:
+            offers = json.loads(stdout.decode())
+        except Exception as e:
+            logger.error("Failed to parse search offers: %s", e)
+            offers = []
+
+        if not offers:
+            logger.error("No dedicated EU offers found matching criteria.")
+            return False
+
+        best_offer = offers[0]
+        offer_id = best_offer.get("id") or best_offer.get("ask_contract_id")
+        logger.info(f"🎯 Selected replacement EU offer {offer_id} ({best_offer.get('gpu_name')}, {best_offer.get('geolocation')})")
+        if status_callback:
+            await status_callback(f"🚀 Provisioning replacement dedicated GPU ({best_offer.get('gpu_name')} in {best_offer.get('geolocation')})...")
+
+        # Create replacement instance
+        create_cmd = [
+            vast_bin, "create", "instance", str(offer_id),
+            "--image", "nvidia/cuda:12.4.1-devel-ubuntu22.04",
+            "--disk", "35",
+            "--ssh", "--direct"
+        ]
+        cproc = await asyncio.create_subprocess_exec(*create_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await cproc.communicate()
+
+        # Destroy old instance if provided
+        if old_instance_id:
+            logger.info(f"🗑️ Destroying old stuck instance {old_instance_id}...")
+            dcmd = [vast_bin, "destroy", "instance", str(old_instance_id)]
+            dproc = await asyncio.create_subprocess_exec(*dcmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await dproc.communicate()
+
+        # Poll for new instance to be ready
+        for _ in range(60):
+            await asyncio.sleep(5)
+            inst = await self.get_active_instance()
+            if not inst:
+                continue
+            st = inst.get("actual_status")
+            ssh_host = inst.get("ssh_host") or inst.get("public_ipaddr")
+            ssh_port = inst.get("ssh_port") or inst.get("ports", {}).get("22/tcp", [{}])[0].get("HostPort")
+            if st == "running" and ssh_host and ssh_port:
+                logger.info("✨ New instance running! Running initial setup...")
+                if status_callback:
+                    await status_callback("📦 Initializing renderer & AI models on fresh GPU...")
+                setup_cmd = f"ssh -o StrictHostKeyChecking=no -p {ssh_port} root@{ssh_host} 'mkdir -p /root/audioviz /root/workspace && ln -s /root/audioviz/video_profiles /root/workspace/video_profiles 2>/dev/null || true' && tar -czf - -C /root/audioviz renderer video_profiles vast_ai_service.py | ssh -o StrictHostKeyChecking=no -p {ssh_port} root@{ssh_host} 'tar -xzf - -C /root/audioviz' && scp -o StrictHostKeyChecking=no -P {ssh_port} /root/setup_gpu.sh root@{ssh_host}:/root/setup_gpu.sh && ssh -o StrictHostKeyChecking=no -p {ssh_port} root@{ssh_host} 'chmod +x /root/setup_gpu.sh && /root/setup_gpu.sh'"
+                sproc = await asyncio.create_subprocess_shell(setup_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                await sproc.communicate()
+                return await self.ensure_tunnel(ssh_host, int(ssh_port))
+
         return False
 
     async def stop_gpu(self) -> bool:

@@ -207,14 +207,14 @@ class VastLifecycleManager:
         return False
 
     async def failover_to_fresh_dedicated_gpu(self, old_instance_id: Optional[int] = None, status_callback=None) -> bool:
-        """Finds a dedicated on-demand EU GPU, provisions it, destroys the old instance, and connects."""
+        """Finds a verified dedicated on-demand EU RTX GPU, provisions it, destroys the old instance, and connects."""
         logger.info("🔄 Initiating automatic failover for dedicated EU GPU...")
         vast_bin = "/root/workspace/.venv/bin/vastai"
         if not os.path.exists(vast_bin):
             vast_bin = "vastai"
 
-        # Search top dedicated on-demand offer in EU
-        query = "rentable=true num_gpus=1 gpu_frac=1.0 gpu_ram>=12 dph<=0.35 geolocation in [DE,CZ,PL,FR,NL,ES,AT,CH,IT,SE,NO,FI,DK,BE,GB]"
+        # Search top verified dedicated RTX offer in EU
+        query = "verified=true rentable=true num_gpus=1 gpu_frac=1.0 gpu_name in [RTX_3080,RTX_3090,RTX_4070,RTX_4080,RTX_4090,RTX_A4000,RTX_A4500,RTX_A5000] dph<=0.35 geolocation in [DE,CZ,PL,FR,NL,ES,AT,CH,IT,SE,NO,FI,DK,BE,GB]"
         cmd = [vast_bin, "search", "offers", "-d", "-n", query, "-o", "score-", "--raw"]
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
@@ -239,29 +239,46 @@ class VastLifecycleManager:
             vast_bin, "create", "instance", str(offer_id),
             "--image", "nvidia/cuda:12.4.1-devel-ubuntu22.04",
             "--disk", "35",
-            "--ssh", "--direct"
+            "--ssh", "--direct",
+            "--raw"
         ]
         cproc = await asyncio.create_subprocess_exec(*create_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await cproc.communicate()
+        c_out, _ = await cproc.communicate()
+        new_inst_id = None
+        try:
+            c_json = json.loads(c_out.decode())
+            new_inst_id = c_json.get("new_contract") or c_json.get("id")
+        except Exception:
+            pass
 
         # Destroy old instance if provided
         if old_instance_id:
             logger.info(f"🗑️ Destroying old stuck instance {old_instance_id}...")
-            dcmd = [vast_bin, "destroy", "instance", str(old_instance_id)]
-            dproc = await asyncio.create_subprocess_exec(*dcmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            dcmd = f"echo y | {vast_bin} destroy instance {old_instance_id}"
+            dproc = await asyncio.create_subprocess_shell(dcmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await dproc.communicate()
 
         # Poll for new instance to be ready
         for _ in range(60):
             await asyncio.sleep(5)
-            inst = await self.get_active_instance()
+            res = await self._api_request("GET", "v1/instances/")
+            instances = res.get("instances", [])
+            inst = None
+            if new_inst_id:
+                for item in instances:
+                    if item.get("id") == new_inst_id:
+                        inst = item
+                        break
+            if not inst and instances:
+                inst = instances[0]
+
             if not inst:
                 continue
             st = inst.get("actual_status")
             ssh_host = inst.get("ssh_host") or inst.get("public_ipaddr")
             ssh_port = inst.get("ssh_port") or inst.get("ports", {}).get("22/tcp", [{}])[0].get("HostPort")
             if st == "running" and ssh_host and ssh_port:
-                logger.info("✨ New instance running! Running initial setup...")
+                logger.info(f"✨ New instance {inst.get('id')} running at {ssh_host}:{ssh_port}! Running initial setup...")
                 if status_callback:
                     await status_callback("📦 Initializing renderer & AI models on fresh GPU...")
                 setup_cmd = f"ssh -o StrictHostKeyChecking=no -p {ssh_port} root@{ssh_host} 'mkdir -p /root/audioviz /root/workspace && ln -s /root/audioviz/video_profiles /root/workspace/video_profiles 2>/dev/null || true' && tar -czf - -C /root/audioviz renderer video_profiles vast_ai_service.py | ssh -o StrictHostKeyChecking=no -p {ssh_port} root@{ssh_host} 'tar -xzf - -C /root/audioviz' && scp -o StrictHostKeyChecking=no -P {ssh_port} /root/setup_gpu.sh root@{ssh_host}:/root/setup_gpu.sh && ssh -o StrictHostKeyChecking=no -p {ssh_port} root@{ssh_host} 'chmod +x /root/setup_gpu.sh && /root/setup_gpu.sh'"

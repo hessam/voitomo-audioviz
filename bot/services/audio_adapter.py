@@ -84,6 +84,21 @@ class AudioIntelligenceAdapter:
         language: str = "fa",
         total_duration: Optional[float] = None
     ) -> Dict[str, Any]:
+        from bot.services.vast_lifecycle import VastLifecycleManager
+
+        async with VastLifecycleManager.get_instance().managed_gpu():
+            return await AudioIntelligenceAdapter._align_lyrics_ready(
+                audio_path, lyrics_text, ai_url, language, total_duration
+            )
+
+    @staticmethod
+    async def _align_lyrics_ready(
+        audio_path: str,
+        lyrics_text: str,
+        ai_url: str,
+        language: str = "fa",
+        total_duration: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """
         Forced-aligns lyrics text against audio using Vast GPU (/ai/align).
         Returns dict with 'words', 'alignment_score', 'duration', etc.
@@ -127,27 +142,53 @@ class AudioIntelligenceAdapter:
 
         ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL") or "http://127.0.0.1:4002"
 
-        # Ensure GPU is awake and ready
+        # An enclosing analysis lease can retain the GPU for transcription.
         from bot.services.vast_lifecycle import VastLifecycleManager
         mgr = VastLifecycleManager.get_instance()
-        gpu_ready = await mgr.ensure_gpu_ready(status_callback=status_callback)
-        if not gpu_ready:
-            raise RuntimeError(
-                "❌ Vast GPU instance failed to wake up within 5 minutes (300s).\n"
-                "Mel-Band RoFormer requires dedicated GPU. Hetzner CPU fallback is strictly disabled."
+        async with mgr.managed_gpu(status_callback=status_callback):
+            if status_callback:
+                await status_callback("🎙 **Processing stems with Mel-Band RoFormer on GPU...**")
+
+            try:
+                gpu_stems = await AudioIntelligenceAdapter.separate_stems_gpu(audio_path, ai_url)
+                if not gpu_stems or not gpu_stems.get("vocals"):
+                    raise RuntimeError("GPU Mel-Band RoFormer returned empty stems.")
+                return gpu_stems
+            except Exception as e:
+                logger.error(f"GPU Mel-Band RoFormer separation error: {e}")
+                raise RuntimeError(f"GPU Mel-Band RoFormer stem separation failed: {e}")
+
+    @staticmethod
+    async def prepare_visualizer_audio(
+        audio_path: str,
+        status_callback=None,
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Separate/download stems and transcribe before releasing the GPU."""
+        from bot.services.vast_lifecycle import VastLifecycleManager
+        from bot.services.lyric_transcriber import transcribe_lyrics_managed
+
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Input audio file not found: {audio_path}")
+
+        async with VastLifecycleManager.get_instance().managed_gpu(status_callback):
+            stems = await AudioIntelligenceAdapter.separate_stems_broker(
+                audio_path, status_callback=status_callback
             )
-
-        if status_callback:
-            await status_callback("🎙 **Processing stems with Mel-Band RoFormer on GPU...**")
-
-        try:
-            gpu_stems = await AudioIntelligenceAdapter.separate_stems_gpu(audio_path, ai_url)
-            if not gpu_stems or not gpu_stems.get("vocals"):
-                raise RuntimeError("GPU Mel-Band RoFormer returned empty stems.")
-            return gpu_stems
-        except Exception as e:
-            logger.error(f"GPU Mel-Band RoFormer separation error: {e}")
-            raise RuntimeError(f"GPU Mel-Band RoFormer stem separation failed: {e}")
+            vocal_path = stems.get("vocals")
+            target = vocal_path if vocal_path and os.path.exists(vocal_path) else audio_path
+            words = []
+            try:
+                if status_callback:
+                    await status_callback("🔍 Extracting vocal lyrics via Whisper...")
+                transcript = await transcribe_lyrics_managed(target, language=language)
+                words = transcript.get("words", [])
+                if not words and target != audio_path:
+                    transcript = await transcribe_lyrics_managed(audio_path, language=language)
+                    words = transcript.get("words", [])
+            except Exception as error:
+                logger.info("Vocal transcription unavailable; keeping stems: %s", error)
+            return {"stems": stems, "vocal_path": vocal_path, "words": words}
 
     @staticmethod
     def collect_orphaned_stem_jobs() -> List[Tuple[str, int, int, Dict[str, str]]]:

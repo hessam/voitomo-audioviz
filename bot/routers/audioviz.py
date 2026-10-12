@@ -16,7 +16,6 @@ from aiogram.fsm.state import State, StatesGroup
 
 from bot.services.audio_features import AudioFeatureExtractor, compute_sha256
 from bot.services.audio_adapter import AudioIntelligenceAdapter
-from bot.services.lyric_transcriber import transcribe_lyrics
 from bot.services.alignment import patch_word, parse_edit_command, realign_transcript
 
 logger = logging.getLogger(__name__)
@@ -70,9 +69,14 @@ async def handle_gpu_callback(callback: CallbackQuery):
                 await callback.message.edit_text("⚠️ **GPU wake failed or resources busy.**", parse_mode="Markdown")
     elif action == "stop":
         await callback.answer("Stopping GPU...")
-        await mgr.stop_gpu()
+        stopped = await mgr.stop_gpu()
         if callback.message:
-            await callback.message.edit_text("🛑 **GPU stopped. Billing paused.**", parse_mode="Markdown")
+            text = (
+                "🛑 **GPU stopped.**"
+                if stopped else
+                "⚠️ **GPU stop was not confirmed.** Wait for active processing to finish and retry."
+            )
+            await callback.message.edit_text(text, parse_mode="Markdown")
 
 
 class VisualizerState(StatesGroup):
@@ -148,12 +152,14 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
 
     await update_status("⚡ **Connecting to GPU for Mel-Band RoFormer stem separation...**")
     try:
-        stems = await AudioIntelligenceAdapter.separate_stems_broker(
+        prepared = await AudioIntelligenceAdapter.prepare_visualizer_audio(
             local_path,
-            timeout_seconds=300,
-            status_callback=update_status
+            status_callback=update_status,
+            language="fa",
         )
-        vocal_path = stems.get("vocals")
+        stems = prepared["stems"]
+        vocal_path = prepared["vocal_path"]
+        words = prepared["words"]
     except Exception as e:
         logger.error(f"Stem separation failed: {e}")
         await status_msg.edit_text(
@@ -163,19 +169,6 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
             parse_mode="Markdown"
         )
         return
-
-    # 2. Singing-voice lyric transcription on isolated vocals (or master fallback)
-    await status_msg.edit_text("🔍 Extracting vocal lyrics via Whisper...")
-    words = []
-    transcribe_target = vocal_path if vocal_path and os.path.exists(vocal_path) else local_path
-    try:
-        res = await asyncio.to_thread(transcribe_lyrics, transcribe_target, None, "fa")
-        words = res.get("words", [])
-        if not words and transcribe_target != local_path:
-            res_fb = await asyncio.to_thread(transcribe_lyrics, local_path, None, "fa")
-            words = res_fb.get("words", [])
-    except Exception as e:
-        logger.info(f"Vocal transcription skipped or unavailable: {e}")
 
     _AUDIO_CACHE[job_id] = {
         "audio_path": local_path,
@@ -304,12 +297,15 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         # 2. Trigger Remotion render strictly on GPU renderer
         from bot.services.vast_lifecycle import VastLifecycleManager
         mgr = VastLifecycleManager.get_instance()
-        mgr.is_operating = True
-        try:
-            gpu_ready = await mgr.ensure_gpu_ready()
-            if not gpu_ready:
-                raise RuntimeError("GPU instance failed to wake up within 5 minutes for Remotion rendering.")
 
+        async def gpu_status_cb(msg: str):
+            if callback.message:
+                try:
+                    await callback.message.edit_text(msg, parse_mode="Markdown")
+                except Exception:
+                    pass
+
+        async with mgr.managed_gpu(status_callback=gpu_status_cb):
             total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
             rendered_mp4 = None
             async with aiohttp.ClientSession() as session:
@@ -423,9 +419,6 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
 
             if render_error:
                 raise RuntimeError(f"Render server error: {render_error}")
-        finally:
-            mgr.is_operating = False
-            mgr.record_activity()
 
         if not rendered_mp4 or not os.path.exists(rendered_mp4):
             raise FileNotFoundError(f"Rendered video not found at: {rendered_mp4}")
@@ -560,4 +553,3 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
         parse_mode="Markdown",
     )
     await state.set_state(VisualizerState.waiting_for_style)
-

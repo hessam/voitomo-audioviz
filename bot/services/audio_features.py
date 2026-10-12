@@ -368,9 +368,9 @@ class AudioFeatureExtractor:
         # If words is empty or missing, run lyric transcription on isolated vocal stem ONLY if show_lyrics is True
         if show_lyrics and (not words or len(words) == 0) and vocal_stem_path and os.path.exists(vocal_stem_path):
             try:
-                from bot.services.lyric_transcriber import transcribe_lyrics
+                from bot.services.lyric_transcriber import transcribe_lyrics_managed
                 logger.info(f"🎙 Running singing transcription on isolated vocal stem: {vocal_stem_path}")
-                lyric_res = await asyncio.to_thread(transcribe_lyrics, vocal_stem_path)
+                lyric_res = await transcribe_lyrics_managed(vocal_stem_path)
                 words = lyric_res.get("words", [])
                 logger.info(f"✅ Extracted {len(words)} lyric words from vocal stem")
             except Exception as e:

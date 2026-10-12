@@ -1,4 +1,5 @@
 import os
+import asyncio
 import re
 import subprocess
 import tempfile
@@ -143,3 +144,36 @@ def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None, 
     except Exception as e:
         logger.error(f"GPU remote transcription failed: {e}")
         unload_whisper_model()
+        raise
+
+
+async def transcribe_lyrics_managed(
+    vocal_audio_path: str,
+    user_lyrics: Optional[str] = None,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Keep the GPU leased until the synchronous transcription request ends."""
+    from bot.services.vast_lifecycle import VastLifecycleManager
+
+    async with VastLifecycleManager.get_instance().managed_gpu():
+        request = asyncio.create_task(asyncio.to_thread(
+            transcribe_lyrics, vocal_audio_path, user_lyrics, language
+        ))
+        cancellation_pending = False
+        # Cancelling a to_thread await does not stop its HTTP request.
+        while True:
+            try:
+                result = await asyncio.shield(request)
+            except asyncio.CancelledError:
+                if request.cancelled():
+                    raise
+                cancellation_pending = True
+                continue
+            except Exception:
+                if cancellation_pending:
+                    logger.exception("Transcription failed while cancellation was pending")
+                    raise asyncio.CancelledError from None
+                raise
+            if cancellation_pending:
+                raise asyncio.CancelledError
+            return result

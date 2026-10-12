@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from bot.services.audio_adapter import AudioIntelligenceAdapter
-from bot.services.lyric_transcriber import transcribe_lyrics
+from bot.services.lyric_transcriber import transcribe_lyrics_managed
 from bot.services.music_director import direct_music_scenes
 from bot.services.director import direct_creative_spec
 from bot.services.normalizer import normalize_persian_asr
@@ -76,7 +76,7 @@ async def handle_music_file(message: Message, state: FSMContext):
         rhythm_info = AudioIntelligenceAdapter.extract_rhythm_and_beats(input_audio_path)
 
         # Step 3: Singing-voice lyric transcription (filtering [music] hallucinations)
-        lyric_res = transcribe_lyrics(vocal_path)
+        lyric_res = await transcribe_lyrics_managed(vocal_path)
 
         if not lyric_res.get("words"):
             await message.answer("⚠️ متنی در این بخش از ترانه شناسایی نشد. می‌توانید متن ترانه را دستی ارسال کنید.")
@@ -127,7 +127,12 @@ async def process_user_lyrics(message: Message, state: FSMContext):
     vocal_path = data.get("vocal_path")
     
     # Re-run transcription with forced alignment against user's lyrics
-    lyric_res = transcribe_lyrics(vocal_path, user_lyrics=user_text)
+    try:
+        lyric_res = await transcribe_lyrics_managed(vocal_path, user_lyrics=user_text)
+    except Exception as e:
+        # Stay in waiting_for_lyrics so the user can resend the text.
+        await message.answer(f"❌ خطا در همگام‌سازی متن ترانه: {e}")
+        return
     await state.update_data(lyrics=lyric_res)
     await state.set_state(MusicState.waiting_for_style)
 

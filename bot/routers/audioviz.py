@@ -304,122 +304,128 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         # 2. Trigger Remotion render strictly on GPU renderer
         from bot.services.vast_lifecycle import VastLifecycleManager
         mgr = VastLifecycleManager.get_instance()
-        gpu_ready = await mgr.ensure_gpu_ready()
-        if not gpu_ready:
-            raise RuntimeError("GPU instance failed to wake up within 5 minutes for Remotion rendering.")
+        mgr.is_operating = True
+        try:
+            gpu_ready = await mgr.ensure_gpu_ready()
+            if not gpu_ready:
+                raise RuntimeError("GPU instance failed to wake up within 5 minutes for Remotion rendering.")
 
-        total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
-        rendered_mp4 = None
-        async with aiohttp.ClientSession() as session:
-            # Upload master audio to GPU renderer via HTTP tunnel
-            master_audio = manifest_dict.get("audio", {}).get("masterUri")
-            if master_audio and os.path.exists(master_audio):
-                upload_url = f"{RENDERER_URL}/upload?path={quote(master_audio)}"
-                logger.info(f"📤 Uploading audio to GPU renderer via tunnel: {master_audio}")
-                with open(master_audio, "rb") as f:
-                    async with session.post(
-                        upload_url,
-                        data=f,
-                        headers={"Content-Type": "application/octet-stream"},
-                        timeout=aiohttp.ClientTimeout(total=180),
-                    ) as up_resp:
-                        if up_resp.status != 200:
-                            err_txt = await up_resp.text()
-                            raise RuntimeError(f"Failed to upload audio to render server: {err_txt}")
+            total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
+            rendered_mp4 = None
+            async with aiohttp.ClientSession() as session:
+                # Upload master audio to GPU renderer via HTTP tunnel
+                master_audio = manifest_dict.get("audio", {}).get("masterUri")
+                if master_audio and os.path.exists(master_audio):
+                    upload_url = f"{RENDERER_URL}/upload?path={quote(master_audio)}"
+                    logger.info(f"📤 Uploading audio to GPU renderer via tunnel: {master_audio}")
+                    with open(master_audio, "rb") as f:
+                        async with session.post(
+                            upload_url,
+                            data=f,
+                            headers={"Content-Type": "application/octet-stream"},
+                            timeout=aiohttp.ClientTimeout(total=180),
+                        ) as up_resp:
+                            if up_resp.status != 200:
+                                err_txt = await up_resp.text()
+                                raise RuntimeError(f"Failed to upload audio to render server: {err_txt}")
 
-            # Trigger render in async job mode
-            async with session.post(
-                f"{RENDERER_URL}/render",
-                json={"manifest": manifest_dict, "jobId": job_id, "async": True},
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status != 200:
-                    err_text = await resp.text()
-                    raise RuntimeError(f"Render server error ({resp.status}): {err_text}")
+                # Trigger render in async job mode
+                async with session.post(
+                    f"{RENDERER_URL}/render",
+                    json={"manifest": manifest_dict, "jobId": job_id, "async": True},
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as resp:
+                    if resp.status != 200:
+                        err_text = await resp.text()
+                        raise RuntimeError(f"Render server error ({resp.status}): {err_text}")
 
-            poll_interval = 4.0
-            last_edit_ts = 0.0
-            last_pct = -1
-            poll_deadline = time.time() + total_render_timeout
+                poll_interval = 4.0
+                last_edit_ts = 0.0
+                last_pct = -1
+                poll_deadline = time.time() + total_render_timeout
 
-            render_error = None
-            while time.time() < poll_deadline:
-                await asyncio.sleep(poll_interval)
-                try:
-                    async with session.get(
-                        f"{RENDERER_URL}/render/jobs/{job_id}",
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as status_resp:
-                        if status_resp.status != 200:
-                            continue
-                        job_info = await status_resp.json()
-                        st = job_info.get("status")
-                        if st == "done":
-                            local_dest = os.path.join("/tmp/audioviz_work", f"{job_id}.mp4")
-                            os.makedirs("/tmp/audioviz_work", exist_ok=True)
-                            dl_url = f"{RENDERER_URL}/download/{job_id}"
-                            logger.info(f"📥 Downloading rendered MP4 from GPU: {dl_url}...")
-                            async with session.get(dl_url, timeout=aiohttp.ClientTimeout(total=600)) as dl_resp:
-                                if dl_resp.status != 200:
-                                    raise RuntimeError(f"Failed to download rendered video ({dl_resp.status})")
-                                with open(local_dest, "wb") as out_f:
-                                    while True:
-                                        chunk = await dl_resp.content.read(1024 * 1024)
-                                        if not chunk:
-                                            break
-                                        out_f.write(chunk)
-                            rendered_mp4 = local_dest
-                            logger.info(f"✅ Rendered MP4 retrieved ({os.path.getsize(rendered_mp4) / (1024*1024):.1f}MB)")
-                            break
-                        elif st == "error":
-                            render_error = job_info.get("error") or "Unknown render server failure"
-                            break
+                render_error = None
+                while time.time() < poll_deadline:
+                    await asyncio.sleep(poll_interval)
+                    mgr.record_activity()
+                    try:
+                        async with session.get(
+                            f"{RENDERER_URL}/render/jobs/{job_id}",
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as status_resp:
+                            if status_resp.status != 200:
+                                continue
+                            job_info = await status_resp.json()
+                            st = job_info.get("status")
+                            if st == "done":
+                                local_dest = os.path.join("/tmp/audioviz_work", f"{job_id}.mp4")
+                                os.makedirs("/tmp/audioviz_work", exist_ok=True)
+                                dl_url = f"{RENDERER_URL}/download/{job_id}"
+                                logger.info(f"📥 Downloading rendered MP4 from GPU: {dl_url}...")
+                                async with session.get(dl_url, timeout=aiohttp.ClientTimeout(total=600)) as dl_resp:
+                                    if dl_resp.status != 200:
+                                        raise RuntimeError(f"Failed to download rendered video ({dl_resp.status})")
+                                    with open(local_dest, "wb") as out_f:
+                                        while True:
+                                            chunk = await dl_resp.content.read(1024 * 1024)
+                                            if not chunk:
+                                                break
+                                            out_f.write(chunk)
+                                rendered_mp4 = local_dest
+                                logger.info(f"✅ Rendered MP4 retrieved ({os.path.getsize(rendered_mp4) / (1024*1024):.1f}MB)")
+                                break
+                            elif st == "error":
+                                render_error = job_info.get("error") or "Unknown render server failure"
+                                break
 
-                        pct = int(job_info.get("percent", 0))
-                        frames_done = job_info.get("renderedFrames", 0)
-                        total_f = job_info.get("totalFrames", manifest.video.frameCount)
-                        eta_sec = int(job_info.get("etaSeconds", 0))
+                            pct = int(job_info.get("percent", 0))
+                            frames_done = job_info.get("renderedFrames", 0)
+                            total_f = job_info.get("totalFrames", manifest.video.frameCount)
+                            eta_sec = int(job_info.get("etaSeconds", 0))
 
-                        now = time.time()
-                        if (now - last_edit_ts) >= 3.0:
-                            last_edit_ts = now
-                            last_pct = pct
-                            filled = min(10, max(0, pct // 10))
-                            bar = "█" * filled + "░" * (10 - filled)
+                            now = time.time()
+                            if (now - last_edit_ts) >= 3.0:
+                                last_edit_ts = now
+                                last_pct = pct
+                                filled = min(10, max(0, pct // 10))
+                                bar = "█" * filled + "░" * (10 - filled)
 
-                            if pct >= 100 or frames_done >= total_f:
-                                status_text = (
-                                    f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
-                                    f"`[██████████]` **100%** (Frames complete)\n"
-                                    f"🎬 Finalizing video & audio encoding with FFmpeg..."
-                                )
-                            else:
-                                if eta_sec > 0:
-                                    m, s = divmod(eta_sec, 60)
-                                    eta_str = f"{m}m {s}s" if m > 0 else f"{s}s"
-                                else:
-                                    eta_str = "Calculating..."
-
-                                status_text = (
-                                    f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
-                                    f"`[{bar}]` **{pct}%**\n"
-                                    f"🎞 Frames: `{frames_done}/{total_f}`\n"
-                                    f"⏱ Est. Remaining: `{eta_str}`"
-                                )
-
-                            if callback.message:
-                                try:
-                                    await callback.message.edit_text(
-                                        status_text,
-                                        parse_mode="Markdown",
+                                if pct >= 100 or frames_done >= total_f:
+                                    status_text = (
+                                        f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
+                                        f"`[██████████]` **100%** (Frames complete)\n"
+                                        f"🎬 Finalizing video & audio encoding with FFmpeg..."
                                     )
-                                except Exception:
-                                    pass
-                except Exception as poll_err:
-                    logger.debug(f"Progress poll notice: {poll_err}")
+                                else:
+                                    if eta_sec > 0:
+                                        m, s = divmod(eta_sec, 60)
+                                        eta_str = f"{m}m {s}s" if m > 0 else f"{s}s"
+                                    else:
+                                        eta_str = "Calculating..."
+
+                                    status_text = (
+                                        f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n"
+                                        f"`[{bar}]` **{pct}%**\n"
+                                        f"🎞 Frames: `{frames_done}/{total_f}`\n"
+                                        f"⏱ Est. Remaining: `{eta_str}`"
+                                    )
+
+                                if callback.message:
+                                    try:
+                                        await callback.message.edit_text(
+                                            status_text,
+                                            parse_mode="Markdown",
+                                        )
+                                    except Exception:
+                                        pass
+                    except Exception as poll_err:
+                        logger.debug(f"Progress poll notice: {poll_err}")
 
             if render_error:
                 raise RuntimeError(f"Render server error: {render_error}")
+        finally:
+            mgr.is_operating = False
+            mgr.record_activity()
 
         if not rendered_mp4 or not os.path.exists(rendered_mp4):
             raise FileNotFoundError(f"Rendered video not found at: {rendered_mp4}")

@@ -133,5 +133,25 @@ class TestAlignmentRegressions(unittest.TestCase):
                 self.assertGreaterEqual(w.endFrame, w.startFrame)
 
 
+    def test_transcription_confidence_is_kept_as_word_score(self):
+        """
+        Reproduction defect: the transcriber emits 'confidence', but the
+        phrase builder read only 'score', so every word became 1.0.
+        Fix requirement: a 0.07 transcription confidence must reach the word score.
+        """
+        words = [
+            {"word": "hello", "start": 0.0, "end": 0.5, "confidence": 0.07},
+            {"word": "there", "start": 0.6, "end": 1.0, "confidence": 0.9},
+        ]
+        phrases = group_words_into_phrases(words, fps=30)
+        scores = [w.score for p in phrases for w in p.words]
+        self.assertEqual(scores, [0.07, 0.9])
+
+    def test_alignment_score_is_still_used(self):
+        words = [{"word": "hello", "start": 0.0, "end": 0.5, "score": 0.42}]
+        phrases = group_words_into_phrases(words, fps=30)
+        self.assertEqual([w.score for p in phrases for w in p.words], [0.42])
+
+
 if __name__ == "__main__":
     unittest.main()

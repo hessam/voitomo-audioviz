@@ -6,6 +6,12 @@ on:
     workflows: ["CI Quality Gate"]
     types: [completed]
     branches: [main]
+  # Manual deploy or rollback of one commit already on origin/main.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full commit SHA on origin/main to deploy"
+        required: true
 
 permissions:
   contents: read
@@ -17,8 +23,9 @@ concurrency:
 jobs:
   deploy:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     # The production environment requires a reviewer; see the PR description.
     environment: production
@@ -26,7 +33,7 @@ jobs:
       - name: Checkout the tested commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ inputs.sha || github.event.workflow_run.head_sha }}
 
       - name: Check deploy configuration
         env:
@@ -57,7 +64,7 @@ jobs:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
           RESTART_CMD: ${{ vars.RESTART_CMD }}
           HEALTH_CMD: ${{ vars.HEALTH_CMD }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ inputs.sha || github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh

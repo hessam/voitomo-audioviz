@@ -193,6 +193,15 @@ def extract_multiband_features_ffmpeg(
     )
 
 
+def _word_score(word: Dict[str, Any]) -> float:
+    """
+    Alignment emits 'score'; transcription emits 'confidence'.
+    A word with neither keeps the legacy 1.0 default.
+    """
+    raw = word.get("score", word.get("confidence"))
+    return float(raw) if raw is not None else 1.0
+
+
 def group_words_into_phrases(
     words: List[Dict[str, Any]],
     fps: int = 30,
@@ -261,7 +270,7 @@ def group_words_into_phrases(
 
         w_start_frame = int(round(w_start_sec * fps))
         w_end_frame = max(w_start_frame + 1, int(round(w_end_sec * fps)))
-        w_score = float(w.get("score", 1.0))
+        w_score = _word_score(w)
         w_interp = bool(w.get("is_interpolated", False))
         w_src = str(w.get("alignment_source", "acoustic"))
 

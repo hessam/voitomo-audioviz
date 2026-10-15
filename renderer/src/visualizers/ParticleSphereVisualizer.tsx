@@ -204,10 +204,12 @@ void main() {
 
   // Energy flare on bass/transient drops and expressive melodic solos
   col *= (1.05 + uBass * 0.30 + uTransient * 0.40 + uMids * 0.22);
+  // Treble shows as brightness and opacity: point-size clamps alone used to hide it completely.
+  col += vec3(1.0, 0.86, 0.40) * (vTreble * 0.14);
 
   // Additive blending alpha:
   // Points accumulate density in the dense core and overlapping folds
-  float alpha = alphaMask * facingWeight * (0.65 + rim * 0.35 + vRidge * 0.25);
+  float alpha = alphaMask * facingWeight * (0.65 + rim * 0.35 + vRidge * 0.25) * (1.0 + vTreble * 0.2);
 
   gl_FragColor = vec4(col, alpha);
 }
@@ -500,6 +502,9 @@ export const ParticleSphereVisualizer: React.FC<ParticleSphereVisualizerProps> =
     orbMaterial.uniforms.uShockAge.value  = motion.shockAge;
     orbMaterial.uniforms.uFlow.value      = motion.flow;
     orbMaterial.uniforms.uTwist.value     = motion.twist;
+    // "Intensity zero" must disable every driven effect, including beat pulses.
+    const drive = Number.isFinite(intensity) ? Math.max(0, Math.min(2, intensity)) : 1;
+    beatImpulse *= drive;
     orbMaterial.uniforms.uBeat.value      = beatImpulse;
 
     sparkMaterial.uniforms.uTime.value      = timeSeconds;

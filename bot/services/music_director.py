@@ -33,7 +33,7 @@ def direct_music_scenes(
     total_frames = max(30, round(duration * fps))
     downbeat_frames = rhythm_info.get("downbeat_frames", [])
     beat_frames = rhythm_info.get("beat_frames", [])
-    bpm = rhythm_info.get("bpm", 120.0)
+    bpm = rhythm_info.get("bpm") or 120.0  # legacy path: unknown tempo falls back to 120
 
     if not lyric_words:
         return [{

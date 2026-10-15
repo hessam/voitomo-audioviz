@@ -25,7 +25,7 @@ export function validateManifest(value: unknown): asserts value is RenderManifes
   requireValue(typeof m.jobId === "string" && m.jobId.trim().length > 0, "jobId is required");
   requireValue(typeof m.seed === "number" && Number.isSafeInteger(m.seed), "seed must be an integer");
   const preset = record(m.preset, "preset");
-  requireValue(["sphere", "iris", "neural", "monolith"].includes(String(preset.id)), "Unknown preset");
+  requireValue(["sphere", "orrery", "cymatic", "bodies"].includes(String(preset.id)), "Unknown preset");
   requireValue(typeof preset.version === "string" && preset.version.length > 0, "preset.version is required");
   const params = record(preset.parameters, "preset.parameters");
   requireValue(Object.values(params).every(v => typeof v === "string" || typeof v === "boolean" ||
@@ -57,10 +57,45 @@ export function validateManifest(value: unknown): asserts value is RenderManifes
     requireValue(Array.isArray(values) && values.every((v, i) =>
       Number.isSafeInteger(v) && v >= 0 && v < count && (i === 0 || v >= values[i - 1])), `Invalid ${key} timeline`);
   }
-  requireValue(features.bpm === undefined || (typeof features.bpm === "number" && Number.isFinite(features.bpm) && features.bpm > 0), "Invalid bpm");
+  requireValue(features.bpm == null || (typeof features.bpm === "number" && Number.isFinite(features.bpm) && features.bpm > 0), "Invalid bpm");
+  requireValue(features.rhythmSource === undefined || ["unknown", "broker", "estimated"].includes(String(features.rhythmSource)), "Invalid rhythmSource");
+  requireValue(features.meterBeats == null || (Number.isSafeInteger(features.meterBeats) && (features.meterBeats as number) >= 2 && (features.meterBeats as number) <= 16), "Invalid meterBeats");
+  for (const key of ["onsets", "notes"]) {
+    const values = features[key];
+    if (values === undefined) continue;
+    requireValue(Array.isArray(values), `${key} must be an array`);
+    let previous = -1;
+    for (const item of values as unknown[]) {
+      const event = record(item, key);
+      const first = (key === "onsets" ? event.frame : event.startFrame) as unknown;
+      requireValue(typeof first === "number" && Number.isSafeInteger(first) && first >= 0 && first < count && first >= previous, `Invalid ${key} timeline`);
+      previous = first as number;
+      if (key === "onsets") {
+        requireValue(typeof event.strength === "number" && event.strength >= 0 && event.strength <= 1, "Invalid onset strength");
+        requireValue(["kick", "snare", "cymbal", "other"].includes(String(event.kind)), "Invalid onset kind");
+      } else {
+        requireValue(typeof event.pitchHz === "number" && Number.isFinite(event.pitchHz) && event.pitchHz > 0, "Invalid note pitch");
+        requireValue(typeof event.endFrame === "number" && Number.isSafeInteger(event.endFrame) && event.endFrame > (first as number) && event.endFrame <= count, "Invalid note interval");
+      }
+    }
+  }
+  if (features.bodyBands !== undefined) {
+    const bands = record(features.bodyBands, "bodyBands");
+    for (const [stem, rows] of Object.entries(bands)) {
+      requireValue(/^[a-z]{2,16}$/.test(stem), "Invalid bodyBands stem name");
+      requireValue(Array.isArray(rows) && rows.length === count && rows.every(row => Array.isArray(row) && row.length === 12 &&
+        row.every(v => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1)), `bodyBands.${stem} must be frameCount rows of 12 values in 0..1`);
+    }
+  }
+  if (features.riffCycle != null) {
+    const riff = record(features.riffCycle, "riffCycle");
+    requireValue(Number.isSafeInteger(riff.lengthSteps) && (riff.lengthSteps as number) >= 2 && (riff.lengthSteps as number) <= 128, "Invalid riffCycle.lengthSteps");
+    requireValue(typeof riff.stepFrames === "number" && Number.isFinite(riff.stepFrames) && riff.stepFrames > 0, "Invalid riffCycle.stepFrames");
+  }
   requireValue(features.musicalKey === undefined || typeof features.musicalKey === "string", "Invalid musicalKey");
   const lyrics = record(m.lyrics, "lyrics");
   requireValue(Array.isArray(lyrics.lines), "lyrics.lines must be an array");
+  requireValue(lyrics.mode === undefined || ["off", "subtitles", "video"].includes(String(lyrics.mode)), "Invalid lyrics.mode");
   let previousStart = -1;
   for (const item of lyrics.lines) {
     const line = record(item, "lyric line");

@@ -28,13 +28,13 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pydantic aiohttp aiogram librosa soundfile
+          pip install pytest pytest-asyncio pydantic aiohttp aiogram librosa soundfile numpy
 
       - name: Run Python Tests
         env:
           PYTHONPATH: .
         run: |
-          python -m pytest tests/test_music_engine.py tests/test_end_to_end_manifest.py
+          python -m pytest tests/test_music_engine.py tests/test_end_to_end_manifest.py tests/test_audio_features.py tests/test_audio_bands.py tests/test_rhythm_analysis.py tests/test_alignment_regressions.py
 
   renderer-quality:
     name: TypeScript & Renderer Build
@@ -57,3 +57,10 @@ jobs:
       - name: TypeScript Type Check
         working-directory: ./renderer
         run: npx tsc --noEmit
+
+      - name: Motion, Model and Contract Tests
+        working-directory: ./renderer
+        run: |
+          for t in test_sphere_motion test_orrery_model test_cymatic_model test_bodies_model test_lyric_model test_render_contract; do
+            npx ts-node --transpile-only "$t.ts" || exit 1
+          done

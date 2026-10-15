@@ -58,3 +58,24 @@ test("invalid samples stay finite and absent vocal/drum curves use band fallback
   assert.ok(motion[15].vocal > 0 && motion[15].transient > 0);
   assert.ok(motion.every(m => Object.values(m).every(Number.isFinite)));
 });
+
+test("a bass hit peaks within 3 frames and starts at the hit frame (was 4 frames late)", () => {
+  const features = signal(); features.bass[10] = 1;
+  const motion = compileSphereMotion(features, 30);
+  const window = motion.slice(10, 20).map(m => m.bass);
+  const peak = Math.max(...window);
+  assert.ok(window[0] > 0.3 * peak, "response must already be visible on the hit frame");
+  assert.ok(window.indexOf(peak) <= 3, `bass peaked ${window.indexOf(peak)} frames after the hit`);
+  assert.equal(motion[9].bass, 0, "no response before the hit");
+});
+
+test("classified onsets set shock strength and cymbals are weaker than kicks", () => {
+  const features = signal();
+  features.onsets = [{ frame: 12, strength: 0.9, kind: "kick" }, { frame: 40, strength: 0.9, kind: "cymbal" }];
+  features.transients = [12, 40, 70];  // ignored once onsets exist
+  const motion = compileSphereMotion(features, 30);
+  assert.ok(motion[12].transient > 0.8);
+  assert.ok(motion[40].transient > 0.3 && motion[40].transient < 0.6 * motion[12].transient + 0.2);
+  assert.ok(motion[70].transient < 0.01, "no new shock from the ignored bare transient");
+  assert.equal(motion[11].transient, 0);
+});

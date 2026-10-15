@@ -16,12 +16,49 @@ from aiogram.fsm.state import State, StatesGroup
 
 from bot.services.audio_features import AudioFeatureExtractor, compute_sha256
 from bot.services.audio_adapter import AudioIntelligenceAdapter
-from bot.services.alignment import patch_word, parse_edit_command, realign_transcript
+from bot.services.alignment import patch_word, parse_edit_command, realign_transcript, parse_offset_command, shift_words
 
 logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
 
 VAULT_STORAGE_PATH = os.environ.get("VAULT_STORAGE_PATH", "/opt/hermes-vault/motion/renders")
+
+# Every style the renderer knows. Only the ones listed in AUDIOVIZ_ENABLED_STYLES are offered, so a
+# new style stays hidden until it has passed capture and response checks (default: sphere only).
+STYLE_CATALOG: Dict[str, tuple] = {
+    "sphere": ("🌟 Particle Sphere", "energy and emotion: bass pressure, drum shockwaves, vocal flow"),
+    "orrery": ("🪐 Polymeter Orrery", "rhythm: rings for the bar and the riff cycle, one mark per hit"),
+    "cymatic": ("🎼 Cymatic Plate", "pitch: sand settles on the vibration pattern of the notes"),
+    "bodies": ("🎸 Resonant Bodies", "timbre: strings, skins and cymbals that ring like the real sound"),
+}
+LYRIC_MODES = ("off", "subtitles", "video")
+LYRIC_MODE_LABELS = {"off": "Off", "subtitles": "Subtitles", "video": "Lyric video"}
+
+
+def enabled_styles() -> list:
+    wanted = [x.strip() for x in os.environ.get("AUDIOVIZ_ENABLED_STYLES", "sphere").split(",")]
+    styles = [x for x in wanted if x in STYLE_CATALOG]
+    return styles or ["sphere"]
+
+
+def next_lyric_mode(mode: str) -> str:
+    return LYRIC_MODES[(LYRIC_MODES.index(mode) + 1) % len(LYRIC_MODES)] if mode in LYRIC_MODES else "subtitles"
+
+
+def style_menu_text(lyric_preview: str = "") -> str:
+    lines = "\n".join(f"• **{STYLE_CATALOG[s][0][2:]}**: {STYLE_CATALOG[s][1]}" for s in enabled_styles())
+    return f"{lyric_preview}🎛 **Select a visualizer style:**\n\n{lines}"
+
+
+def lyric_preview_text(words, mode: str, heading: str = "Detected lyrics") -> str:
+    if not words:
+        return ""
+    if mode == "off":
+        return "🚫 _Lyrics are off: the video shows only the visualizer._\n\n"
+    full_lyrics = " ".join(w.get("word", "") for w in words).strip()
+    if len(full_lyrics) > 280:
+        full_lyrics = full_lyrics[:280] + "..."
+    return f"🎙 **{heading}** ({LYRIC_MODE_LABELS[mode]}):\n_{full_lyrics}_\n\n"
 
 @router.message(Command("gpu", "gpu_status"))
 async def cmd_gpu_status(message: Message):
@@ -87,31 +124,18 @@ class VisualizerState(StatesGroup):
     rendering = State()
 
 
-def get_visualizer_keyboard(job_id: str, has_words: bool = False, show_lyrics: bool = True) -> InlineKeyboardMarkup:
+def get_visualizer_keyboard(job_id: str, has_words: bool = False, lyric_mode: str = "subtitles") -> InlineKeyboardMarkup:
     buttons = [
-        [
-            InlineKeyboardButton(text="🌟 Particle Sphere (Golden Glow)", callback_data=f"viz:{job_id}:sphere"),
-        ],
-        [
-            InlineKeyboardButton(text="🌀 Quantum Iris (Cyan-Violet)", callback_data=f"viz:{job_id}:iris"),
-        ],
-        [
-            InlineKeyboardButton(text="⚡ Neural Synapse (Emerald Web)", callback_data=f"viz:{job_id}:neural"),
-        ],
-        [
-            InlineKeyboardButton(text="🏛️ Monolith Field (Acid-Lime)", callback_data=f"viz:{job_id}:monolith"),
-        ],
+        [InlineKeyboardButton(text=STYLE_CATALOG[style][0], callback_data=f"viz:{job_id}:{style}")]
+        for style in enabled_styles()
     ]
     if has_words:
-        toggle_label = "📝 متن ترانه: فعال (خاموش کردن)" if show_lyrics else "🚫 متن ترانه: غیرفعال (روشن کردن)"
-        toggle_action = "disable_lyrics" if show_lyrics else "enable_lyrics"
         action_row = [
-            InlineKeyboardButton(text=toggle_label, callback_data=f"viz:{job_id}:{toggle_action}")
+            InlineKeyboardButton(text=f"📝 Lyrics: {LYRIC_MODE_LABELS[lyric_mode]} (tap to change)",
+                                 callback_data=f"viz:{job_id}:lyrics")
         ]
-        if show_lyrics:
-            action_row.append(
-                InlineKeyboardButton(text="✏️ ویرایش متن", callback_data=f"viz:{job_id}:edit")
-            )
+        if lyric_mode != "off":
+            action_row.append(InlineKeyboardButton(text="✏️ Edit lyrics", callback_data=f"viz:{job_id}:edit"))
         buttons.append(action_row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -177,24 +201,13 @@ async def handle_audio_message(message: Message, state: FSMContext, bot: Bot):
         "vocal_path": vocal_path,
         "stems": stems,
         "words": words,
-        "show_lyrics": True,
+        "lyric_mode": "subtitles",
     }
 
-    keyboard = get_visualizer_keyboard(job_id, has_words=bool(words), show_lyrics=True)
-    
-    lyric_preview = ""
-    if words:
-        full_lyrics = " ".join(w.get("word", "") for w in words).strip()
-        if len(full_lyrics) > 280:
-            full_lyrics = full_lyrics[:280] + "..."
-        lyric_preview = f"🎙 **متن شناسایی‌شده ترانه:**\n_{full_lyrics}_\n\n"
+    keyboard = get_visualizer_keyboard(job_id, has_words=bool(words), lyric_mode="subtitles")
 
     await status_msg.edit_text(
-        f"{lyric_preview}🎛 **Select a 3D Audio Visualizer Style:**\n\n"
-        "• **Particle Sphere**: 20k gold-amber emissive particles with 3D noise\n"
-        "• **Quantum Iris**: Torus knot inside-out ribbon with cyan-violet flare\n"
-        "• **Neural Synapse**: 1,500 glowing nodes with emerald shockwaves\n"
-        "• **Monolith Field**: 1,024 obsidian pillars with neon lime caps",
+        style_menu_text(lyric_preview_text(words, "subtitles")),
         reply_markup=keyboard,
         parse_mode="Markdown",
     )
@@ -214,32 +227,22 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         await callback.answer("Audio session expired. Please re-send the audio.", show_alert=True)
         return
 
-    # Handle Lyrics Toggle
-    if preset_id in ("disable_lyrics", "enable_lyrics"):
-        show_lyrics = (preset_id == "enable_lyrics")
-        cache_item["show_lyrics"] = show_lyrics
-        await callback.answer("متن ترانه غیرفعال شد (فقط ویژوالایزر)" if not show_lyrics else "متن ترانه فعال شد")
-        
+    # Handle lyric mode change (stale on/off buttons from older menus map to subtitles/off)
+    if preset_id in ("lyrics", "disable_lyrics", "enable_lyrics"):
+        if preset_id == "lyrics":
+            lyric_mode = next_lyric_mode(cache_item.get("lyric_mode", "subtitles"))
+        else:
+            lyric_mode = "subtitles" if preset_id == "enable_lyrics" else "off"
+        cache_item["lyric_mode"] = lyric_mode
+        await callback.answer(f"Lyrics: {LYRIC_MODE_LABELS[lyric_mode]}")
+
         words = cache_item.get("words", [])
-        updated_keyboard = get_visualizer_keyboard(job_id, has_words=bool(words), show_lyrics=show_lyrics)
-        
-        lyric_preview = ""
-        if words and show_lyrics:
-            full_lyrics = " ".join(w.get("word", "") for w in words).strip()
-            if len(full_lyrics) > 280:
-                full_lyrics = full_lyrics[:280] + "..."
-            lyric_preview = f"🎙 **متن شناسایی‌شده ترانه:**\n_{full_lyrics}_\n\n"
-        elif words and not show_lyrics:
-            lyric_preview = "🚫 _حالت بدون متن انتخاب شده است (فقط انیمیشن ۳ بعدی ویژوالایزر)_\n\n"
+        updated_keyboard = get_visualizer_keyboard(job_id, has_words=bool(words), lyric_mode=lyric_mode)
 
         if callback.message:
             try:
                 await callback.message.edit_text(
-                    f"{lyric_preview}🎛 **Select a 3D Audio Visualizer Style:**\n\n"
-                    "• **Particle Sphere**: 20k gold-amber emissive particles with 3D noise\n"
-                    "• **Quantum Iris**: Torus knot inside-out ribbon with cyan-violet flare\n"
-                    "• **Neural Synapse**: 1,500 glowing nodes with emerald shockwaves\n"
-                    "• **Monolith Field**: 1,024 obsidian pillars with neon lime caps",
+                    style_menu_text(lyric_preview_text(words, lyric_mode)),
                     reply_markup=updated_keyboard,
                     parse_mode="Markdown",
                 )
@@ -256,13 +259,19 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         full_lyrics = " ".join(w.get("word", "") for w in words).strip()
         if callback.message:
             await callback.message.reply(
-                "✏️ **ویرایش متن ترانه / Edit Lyrics**\n\n"
-                f"متن فعلی:\n_{full_lyrics}_\n\n"
-                "برای اصلاح، کلمه مورد نظر را به شکل زیر بفرستید:\n"
-                "`کلمه_قدیم -> کلمه_جدید`\n\n"
-                "یا در صورت نیاز، کل متن اصلاح‌شده را به صورت یکجا ارسال نمایید.",
+                "✏️ **Edit lyrics**\n\n"
+                f"Current lyrics:\n_{full_lyrics}_\n\n"
+                "To fix one word, send it like this:\n"
+                "`old_word -> new_word`\n\n"
+                "To replace everything, paste the full corrected lyrics. They are timed against the vocals.\n\n"
+                "If the words appear too early or too late, send `offset +120` or `offset -80` "
+                "(milliseconds; positive makes them later).",
                 parse_mode="Markdown",
             )
+        return
+
+    if preset_id not in enabled_styles():
+        await callback.answer("That style is not available.", show_alert=True)
         return
 
     await callback.answer()
@@ -276,7 +285,8 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         pass
 
     audio_path = cache_item["audio_path"]
-    show_lyrics = cache_item.get("show_lyrics", True)
+    lyric_mode = cache_item.get("lyric_mode", "subtitles")
+    show_lyrics = lyric_mode != "off"
     words = cache_item.get("words", []) if show_lyrics else []
 
     try:
@@ -292,6 +302,7 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             message_id=message_id,
             pre_extracted_stems=cache_item.get("stems"),
             show_lyrics=show_lyrics,
+            lyric_mode=lyric_mode,
         )
 
         manifest_dict = manifest.to_dict()
@@ -494,7 +505,7 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
     data = await state.get_data()
     job_id = data.get("current_edit_job_id")
     if not job_id or job_id not in _AUDIO_CACHE:
-        await message.answer("⚠️ نشست ویرایش منقضی شده است. لطفا فایل صوتی را دوباره ارسال کنید.")
+        await message.answer("⚠️ The edit session expired. Please send the audio file again.")
         await state.clear()
         return
 
@@ -502,15 +513,19 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
     orig_words = cache_item.get("words", [])
     text = (message.text or "").strip()
 
-    parsed = parse_edit_command(text)
-    if parsed:
+    offset_ms = parse_offset_command(text)
+    parsed = None if offset_ms is not None else parse_edit_command(text)
+    if offset_ms is not None:
+        cache_item["words"] = shift_words(orig_words, offset_ms)
+        await message.answer(f"✅ All lyrics moved {'later' if offset_ms >= 0 else 'earlier'} by {abs(offset_ms)} ms.")
+    elif parsed:
         old_word, new_word = parsed
         patched_words = patch_word(orig_words, old_word, new_word)
         if patched_words == orig_words:
-            await message.answer(f"⚠️ کلمه «{old_word}» در متن ترانه یافت نشد. لطفا املای آن را بررسی کنید.")
+            await message.answer(f"⚠️ The word «{old_word}» was not found in the lyrics. Please check its spelling.")
             return
         cache_item["words"] = patched_words
-        await message.answer(f"✅ اصلاح شد: «{old_word}» → «{new_word}»")
+        await message.answer(f"✅ Fixed: «{old_word}» → «{new_word}»")
     else:
         # Full text replacement aligned to acoustic audio timestamps
         from bot.services.audio_features import get_audio_duration_seconds
@@ -542,21 +557,17 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
         cache_item["words"] = realigned
         has_interpolated = any(w.get("is_interpolated", False) for w in realigned)
         if has_interpolated:
-            await message.answer("⚠️ متن ترانه به‌روزرسانی شد. توجه: بخش‌هایی از کلمات جدید بدون تطابق آکوستیک دقیق تخمین زده شده‌اند.")
+            await message.answer("⚠️ Lyrics updated. Note: the timing of some new words is estimated, not matched to the sound.")
         else:
-            await message.answer("✅ کل متن ترانه به‌روزرسانی و با زمان‌بندی دقیق آکوستیک همگام‌سازی شد.")
+            await message.answer("✅ Lyrics updated and timed against the vocals.")
 
     # Re-display style selection with updated lyrics
     updated_words = cache_item.get("words", [])
-    show_lyrics = cache_item.get("show_lyrics", True)
-    full_lyrics = " ".join(w.get("word", "") for w in updated_words).strip()
-    if len(full_lyrics) > 280:
-        full_lyrics = full_lyrics[:280] + "..."
-    lyric_preview = f"🎙 **متن اصلاح‌شده ترانه:**\n_{full_lyrics}_\n\n" if full_lyrics else ""
+    lyric_mode = cache_item.get("lyric_mode", "subtitles")
 
-    keyboard = get_visualizer_keyboard(job_id, has_words=bool(updated_words), show_lyrics=show_lyrics)
+    keyboard = get_visualizer_keyboard(job_id, has_words=bool(updated_words), lyric_mode=lyric_mode)
     await message.answer(
-        f"{lyric_preview}🎛 **اکنون استایل ویژوالایزر را انتخاب کنید:**",
+        style_menu_text(lyric_preview_text(updated_words, lyric_mode, heading="Updated lyrics")),
         reply_markup=keyboard,
         parse_mode="Markdown",
     )

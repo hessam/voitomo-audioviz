@@ -153,5 +153,31 @@ class TestAlignmentRegressions(unittest.TestCase):
         self.assertEqual([w.score for p in phrases for w in p.words], [0.42])
 
 
+
+
+class OffsetCommandTests(unittest.TestCase):
+    def test_offset_commands_are_parsed_in_milliseconds(self):
+        from bot.services.alignment import parse_offset_command
+        self.assertEqual(parse_offset_command("offset +120"), 120)
+        self.assertEqual(parse_offset_command("Offset -80 ms"), -80)
+        self.assertEqual(parse_offset_command("offset 0"), 0)
+
+    def test_other_text_and_huge_offsets_are_not_offset_commands(self):
+        from bot.services.alignment import parse_offset_command
+        for text in ("سلام", "old -> new", "offset", "offset abc", "offset +99999", "my offset +5 words"):
+            self.assertIsNone(parse_offset_command(text), text)
+
+    def test_shifting_moves_every_word_and_never_goes_below_zero(self):
+        from bot.services.alignment import shift_words
+        words = [{"word": "الف", "start": 0.1, "end": 0.4, "score": 0.9}, {"word": "ب", "start": 1.0, "end": 1.5}]
+        later = shift_words(words, 250)
+        self.assertEqual((later[0]["start"], later[0]["end"], later[1]["start"]), (0.35, 0.65, 1.25))
+        self.assertEqual(later[0]["score"], 0.9)
+        earlier = shift_words(words, -500)
+        self.assertEqual(earlier[0]["start"], 0.0)
+        self.assertGreater(earlier[0]["end"], earlier[0]["start"])
+        self.assertEqual(words[0]["start"], 0.1)  # input untouched
+
+
 if __name__ == "__main__":
     unittest.main()

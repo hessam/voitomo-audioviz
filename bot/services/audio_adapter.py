@@ -358,60 +358,29 @@ class AudioIntelligenceAdapter:
     @staticmethod
     def extract_rhythm_and_beats(audio_path: str, fps: int = 30) -> Dict[str, Any]:
         """
-        Extracts musical tempo (BPM) and beat grid timestamps.
-        Provides exact frame markers for Remotion scene cuts and audio-reactive pulses.
+        Local beat tracking with librosa. Honest about failure: if librosa is missing or the
+        tracker finds nothing, the result is status "unknown" with no beats. A made-up 120 BPM
+        grid would drive visuals with fake evidence.
         """
-        # Default rhythm structure if analysis cannot determine tempo
-        default_bpm = 120.0
-        beat_interval_sec = 60.0 / default_bpm
-
+        unknown = {"status": "unknown", "bpm": None, "beats_sec": [], "beat_frames": []}
         try:
-            # Use ffprobe to get exact duration
-            dur_cmd = [
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", audio_path
-            ]
-            dur_out = subprocess.check_output(dur_cmd).decode().strip()
-            total_duration = float(dur_out)
-        except Exception:
-            total_duration = 30.0
-
-        # Try extracting BPM using Aubio/Librosa if available in environment
-        bpm = default_bpm
-        beats_sec = []
-
-        try:
-            # Check for librosa or aubio in python
             import librosa
             y, sr = librosa.load(audio_path, sr=22050, mono=True)
             tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-            if hasattr(tempo, "__iter__"):
-                bpm = float(tempo[0]) if len(tempo) > 0 else default_bpm
-            else:
-                bpm = float(tempo)
+            bpm = float(tempo[0]) if hasattr(tempo, "__iter__") else float(tempo)
             beats_sec = [float(round(t, 3)) for t in librosa.frames_to_time(beat_frames, sr=sr)]
-        except Exception:
-            # Mathematical rhythmic grid generation matching detected duration
-            curr = 0.5
-            while curr < total_duration:
-                beats_sec.append(round(curr, 3))
-                curr += beat_interval_sec
-
-        beat_frames = [int(round(t * fps)) for t in beats_sec]
-
-        # Generate musical 4-bar / 8-bar phrasing markers (assuming 4/4 time signature)
-        bar_interval = 4
-        downbeats_sec = beats_sec[::bar_interval]
-        downbeat_frames = beat_frames[::bar_interval]
-
+        except Exception as e:
+            logger.info(f"Local beat tracking unavailable: {e}")
+            return unknown
+        if not beats_sec or not (bpm > 0):
+            return unknown
         return {
+            "status": "measured",
             "bpm": round(bpm, 1),
-            "total_duration": total_duration,
             "beats_sec": beats_sec,
-            "beat_frames": beat_frames,
-            "downbeats_sec": downbeats_sec,
-            "downbeat_frames": downbeat_frames,
-            "time_signature": "4/4"
+            "beat_frames": [int(round(t * fps)) for t in beats_sec],
+            # Legacy music director only; assumed 4/4, not measured. New code must not use this.
+            "downbeat_frames": [int(round(t * fps)) for t in beats_sec][::4],
         }
 
     @staticmethod

@@ -39,7 +39,7 @@ class TestEndToEndManifest(unittest.TestCase):
             os.remove(cls.audio_path)
 
     def test_all_four_presets_compile(self):
-        presets = ["sphere", "iris", "neural", "monolith"]
+        presets = ["sphere", "orrery", "cymatic", "bodies"]
         words = [
             {"word": "صدای", "start": 0.1, "end": 0.4},
             {"word": "سکوت", "start": 0.4, "end": 0.8},
@@ -68,6 +68,16 @@ class TestEndToEndManifest(unittest.TestCase):
             # Check JSON serialization
             serialized = json.dumps(manifest.to_dict(), ensure_ascii=False)
             self.assertIn(f"test-{p}", serialized)
+
+            # New evidence fields are present, and nothing about rhythm is invented.
+            features = manifest.to_dict()["audio"]["features"]
+            self.assertEqual(manifest.lyrics.mode, "subtitles")
+            for key in ("onsets", "notes", "bodyBands", "rhythmSource", "downbeatsAssumed"):
+                self.assertIn(key, features)
+            self.assertEqual(list(features["bodyBands"]), ["mix"])  # no stems: only a clearly named mix
+            if features["rhythmSource"] == "unknown":
+                self.assertIsNone(features["bpm"])
+                self.assertEqual(features["beatFrames"], [])
 
     def test_show_lyrics_false_yields_zero_lyrics(self):
         words = [

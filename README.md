@@ -31,7 +31,7 @@ flowchart TD
 
     subgraph RENDER["3. Remotion 3D WebGL Runtime"]
         F --> G["Remotion Canvas\n(Chromium Frame-Accurate Clock)"]
-        G --> H["Three.js Generative Visualizers\n• ParticleSphere (Instanced Meshes)\n• NeuralSynapse (Procedural Curves)\n• QuantumIris (Audio-reactive Shaders)\n• MonolithField (Depth Attenuation)"]
+        G --> H["Visualizers\n• Particle Sphere (energy and emotion)\n• Polymeter Orrery (rhythm structure)\n• Cymatic Plate (pitch and harmony)\n• Resonant Bodies (timbre per instrument)"]
         G --> I["Kinetic Typography Layer\n(Swiss-grid & Vazirmatn Optical Align)"]
     end
 
@@ -46,7 +46,7 @@ flowchart TD
 
 ## ⚡ Key Capabilities
 
-* **Audio-Reactive 3D WebGL**: Custom Three.js shaders reacting directly to spectral frequency bands, RMS power curves, and onset transients (`ParticleSphereVisualizer`, `NeuralSynapseVisualizer`, `QuantumIrisVisualizer`).
+* **Audio-Reactive 3D WebGL**: Custom Three.js shaders reacting directly to spectral frequency bands, RMS power curves, and onset transients (`ParticleSphereVisualizer`, `PolymeterOrreryVisualizer`, `CymaticPlateVisualizer`, `ResonantBodiesVisualizer`). See [docs/MUSIC_VISUALIZER_PIVOT_PLAN.md](docs/MUSIC_VISUALIZER_PIVOT_PLAN.md).
 * **Deterministic Sub-Word Sync**: Sub-word acoustic alignment ensures kinetic typography matches voice cadences frame-for-frame, even over instrumental pauses.
 * **LLM Art Direction**: Automatically analyzes semantic mood, narrative momentum, and tempo to assign kinetic archetypes (`HERO_FOCUS`, `METRIC_PUNCH`, `SPLIT_VIEWPORT`, `BENTO_GRID`).
 * **Headless Infrastructure**: Fully scriptable via Node.js and Python. Runs locally or scaled across headless cloud GPU/CPU instances (Docker / Vast.ai / Bare Metal).
@@ -114,8 +114,9 @@ voitomo-audioviz/
 │       ├── Composition.tsx # Root video timeline orchestrator
 │       └── visualizers/    # 3D Three.js shaders & particle meshes
 │           ├── ParticleSphereVisualizer.tsx
-│           ├── NeuralSynapseVisualizer.tsx
-│           └── QuantumIrisVisualizer.tsx
+│           ├── PolymeterOrreryVisualizer.tsx
+│           ├── CymaticPlateVisualizer.tsx
+│           └── ResonantBodiesVisualizer.tsx
 └── tests/                  # Invariant harnesses & integration test suites
 ```
 

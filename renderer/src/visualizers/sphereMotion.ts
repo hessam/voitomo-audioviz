@@ -12,6 +12,12 @@ export interface SphereMotion {
   twist: number;
 }
 
+/** Bass spring: stiff enough to peak about 2 frames after a hit (was 4), still with a small elastic recoil. */
+export const BASS_STIFFNESS = 2500;
+export const BASS_DAMPING = 60;
+/** A cymbal splash should ripple the surface, not shake it like a kick. */
+const CYMBAL_HIT_WEIGHT = 0.5;
+
 const unit = (v: number | undefined) => Number.isFinite(v) ? Math.max(0, Math.min(1, v!)) : 0;
 
 /** Integrate once in timeline order, then sample independently for any rendered frame.
@@ -23,7 +29,16 @@ export function compileSphereMotion(features: AudioMultibandFeatures, fps: numbe
   const sample = (values: number[] | undefined, frame: number) => unit(unit(values?.[frame]) * gain);
   const count = Math.max(features.bass.length, features.mids.length, features.treble.length,
     features.vocalEnergy?.length || 0, features.drumsEnergy?.length || 0);
-  const events = new Set(features.transients);
+  // Hit strength per frame: classified onsets when present, else the bare transient list.
+  const hasOnsets = Boolean(features.onsets?.length);
+  const hits = new Map<number, number>();
+  if (hasOnsets) {
+    for (const o of features.onsets!) {
+      hits.set(o.frame, Math.max(hits.get(o.frame) ?? 0, unit(o.strength) * (o.kind === "cymbal" ? CYMBAL_HIT_WEIGHT : 1)));
+    }
+  } else {
+    for (const frame of features.transients) hits.set(frame, 1);
+  }
   const hasVocals = Boolean(features.vocalEnergy?.length);
   const hasDrums = Boolean(features.drumsEnergy?.length);
   const result: SphereMotion[] = [];
@@ -35,7 +50,7 @@ export function compileSphereMotion(features: AudioMultibandFeatures, fps: numbe
     const target = sample(features.bass, frame);
     // Damped spring: audible attack, a small elastic recoil, then rest.
     for (let step = 0; step < steps; step++) {
-      velocity += (400 * (target - bass) - 28 * velocity) * dt;
+      velocity += (BASS_STIFFNESS * (target - bass) - BASS_DAMPING * velocity) * dt;
       bass += velocity * dt;
     }
     const vocalTarget = sample(hasVocals ? features.vocalEnergy : features.mids, frame);
@@ -43,7 +58,8 @@ export function compileSphereMotion(features: AudioMultibandFeatures, fps: numbe
     const drumTarget = sample(hasDrums ? features.drumsEnergy : features.bass, frame);
     drums += (drumTarget - drums) * (1 - Math.exp(-1 / (fps * 0.035)));
     const onset = Math.max(0, drumTarget - previousDrums);
-    const explicitHit = events.has(frame) ? (hasDrums ? drumTarget : unit(gain)) : 0;
+    const listed = hits.get(frame);
+    const explicitHit = listed === undefined ? 0 : hasOnsets ? unit(listed * gain) : (hasDrums ? drumTarget : unit(gain));
     if ((onset > 0.035 || explicitHit > 0) && frame - lastHit >= fps * 0.065) {
       lastHit = frame;
       strength = unit(Math.max(onset * 3, explicitHit));

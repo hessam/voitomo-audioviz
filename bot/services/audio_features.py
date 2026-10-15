@@ -3,11 +3,12 @@ import hashlib
 import json
 import logging
 import math
-import struct
 import subprocess
 import tempfile
 import asyncio
 from typing import List, Dict, Any, Optional
+
+import numpy as np
 
 from contracts.manifest import (
     RenderManifest,
@@ -21,6 +22,15 @@ from contracts.manifest import (
     VisualizerPresetId,
 )
 from bot.services.audio_adapter import AudioIntelligenceAdapter
+from bot.services.pitch_analysis import decode_band, detect_notes
+from bot.services.spectral_bands import body_bands
+from bot.services.rhythm_analysis import (
+    OnsetAnalysis,
+    decode_mono,
+    detect_onsets,
+    estimate_meter,
+    estimate_riff_cycle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +60,57 @@ def get_audio_duration_seconds(audio_path: str) -> float:
         return 10.0
 
 
+BAND_FILTERS = {
+    "bass": "lowpass=f=250,acompressor=threshold=-18dB:ratio=3",
+    "mids": "highpass=f=250,lowpass=f=4000",
+    "treble": "highpass=f=4000,lowpass=f=16000",
+    "drums": "highpass=f=60,lowpass=f=8000,acompressor=threshold=-16dB:ratio=4",
+    "vocal": "highpass=f=200,lowpass=f=3500",
+    "macro": "volume=1.0",
+}
+# Levels are measured at the source rate (never below 44.1 kHz) so highs are not discarded.
+BAND_SAMPLE_RATE = 48000
+# Full-scale RMS below which a band counts as silence, so quiet leakage is not amplified.
+SILENCE_FLOOR_RMS = 0.003
+MIN_ONSET_STRENGTH_FOR_TRANSIENT = 0.3
+
+
+def decode_band_levels(target_path: str, filter_str: str, fps: int, total_frames: int) -> List[float]:
+    """Absolute RMS per video frame, measured before any time reduction.
+
+    Frame f covers only audio BEFORE its own start time, [(f-1)/fps, f/fps), so the level can
+    never anticipate a sound. Frame 0 is silent by construction.
+    """
+    try:
+        cmd = ["ffmpeg", "-v", "error", "-i", target_path, "-af", filter_str,
+               "-ar", str(BAND_SAMPLE_RATE), "-ac", "1", "-f", "f32le", "-"]
+        raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+    except Exception as e:
+        logger.warning(f"Error extracting band levels ({filter_str}): {e}")
+        return [0.0] * total_frames
+    samples = np.frombuffer(raw, dtype="<f4").astype(np.float64)
+    block = BAND_SAMPLE_RATE // fps
+    blocks = len(samples) // block
+    levels = np.zeros(total_frames)
+    if blocks:
+        rms = np.sqrt((samples[: blocks * block].reshape(blocks, block) ** 2).mean(axis=1))
+        count = min(blocks, total_frames - 1)
+        levels[1: 1 + count] = rms[:count]
+    return levels.tolist()
+
+
+def normalize_levels(levels: List[float]) -> List[float]:
+    """Scale to [0, 1] by the 99th percentile (one spike must not flatten the song).
+
+    A band whose loudest part is below the silence floor stays near zero.
+    """
+    arr = np.asarray(levels, dtype=float)
+    if arr.size == 0:
+        return []
+    reference = max(float(np.percentile(arr, 99)), SILENCE_FLOOR_RMS)
+    return [round(float(v), 4) for v in np.clip(arr / reference, 0.0, 1.0)]
+
+
 def extract_multiband_features_ffmpeg(
     audio_path: str,
     fps: int = 30,
@@ -61,122 +122,103 @@ def extract_multiband_features_ffmpeg(
     dna_data: Optional[Dict[str, Any]] = None,
 ) -> AudioMultibandFeatures:
     """
-    Extracts deterministic 30 FPS normalized [0.0, 1.0] multiband frequency features:
-    - Bass: isolated bass stem or 20Hz - 250Hz lowpass filter
-    - Mids: 250Hz - 4000Hz (harmonic melodies, instruments)
-    - Treble: isolated other/highs or 4000Hz - 16000Hz (sparkles, shimmer)
-    - Transients: frame indices with sharp onset peaks
-    - Vocal Energy: isolated vocal envelope [0.0, 1.0]
-    - Drums Energy: isolated drums envelope or percussion transient envelope [0.0, 1.0]
-    - Macro Energy: overall track dynamic range [0.0, 1.0]
-    - Rhythm Grid: BPM, beat frames, downbeat frames, and harmonic key from Music DNA
+    Extracts deterministic 30 FPS normalized [0.0, 1.0] feature curves and measured events.
+
+    Curves are RAW physical envelopes: no smoothing here. Each style's motion compiler owns
+    attack and release. Missing stems fall back to filtered master bands (an estimate).
+    - Bass: bass stem, else 20-250 Hz of the master
+    - Mids: 250-4000 Hz of the master
+    - Treble: other stem or master, 4000-16000 Hz (measured at the native rate)
+    - Drums / Vocal energy: stem, else a filtered master band
+    - Onsets: classified hits (kick/snare/cymbal) from the drums stem or the master
+    - Rhythm: beats from the music DNA broker (or librosa); bar starts only when a meter was
+      estimated, otherwise they are marked as assumed. Unknown stays unknown.
     """
-    def get_band_rms(target_path: str, filter_str: str) -> List[float]:
-        try:
-            target_sr = fps * 100
-            cmd = [
-                "ffmpeg", "-y", "-i", target_path,
-                "-af", filter_str,
-                "-ar", str(target_sr),
-                "-ac", "1",
-                "-f", "s16le", "-"
-            ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            raw_bytes, _ = proc.communicate()
+    def has(path: Optional[str]) -> bool:
+        return bool(path and os.path.exists(path))
 
-            num_samples = len(raw_bytes) // 2
-            if num_samples == 0:
-                return [0.0] * total_frames
+    def curve(path: Optional[str], band: str) -> List[float]:
+        stem = has(path)
+        target = path if stem else audio_path
+        filt = "volume=1.0" if stem else BAND_FILTERS[band]
+        return normalize_levels(decode_band_levels(target, filt, fps, total_frames))
 
-            samples = struct.unpack(f"<{num_samples}h", raw_bytes)
-            frame_energies: List[float] = []
-            samples_per_frame = 100
+    bass_curve = curve(bass_path, "bass")
+    mids_curve = normalize_levels(decode_band_levels(audio_path, BAND_FILTERS["mids"], fps, total_frames))
+    treble_target = other_path if has(other_path) else audio_path
+    treble_curve = normalize_levels(decode_band_levels(treble_target, BAND_FILTERS["treble"], fps, total_frames))
+    drums_curve = curve(drums_path, "drums")
+    vocal_curve = curve(vocal_path, "vocal")
+    macro_curve = normalize_levels(decode_band_levels(audio_path, BAND_FILTERS["macro"], fps, total_frames))
 
-            for f_idx in range(total_frames):
-                start = f_idx * samples_per_frame
-                end = min(start + samples_per_frame, num_samples)
-                if start >= num_samples:
-                    frame_energies.append(0.0)
-                    continue
+    # Hits from the drums stem when separated, else the master mix.
+    try:
+        onset_analysis = detect_onsets(decode_mono(drums_path if has(drums_path) else audio_path))
+    except Exception as e:
+        logger.warning(f"Onset detection skipped: {e}")
+        onset_analysis = OnsetAnalysis([], [], [])
+    onsets = onset_analysis.events(fps, total_frames)
+    transients = [o.frame for o in onsets if o.strength >= MIN_ONSET_STRENGTH_FOR_TRANSIENT]
 
-                chunk = samples[start:end]
-                if not chunk:
-                    frame_energies.append(0.0)
-                    continue
+    # Pitched notes: bass line from the bass stem (else the low band of the mix), plus vocals when separated.
+    # Monophonic estimates; weak or unpitched passages produce no note.
+    notes = []
+    try:
+        bass_stem = has(bass_path)
+        notes += detect_notes(decode_band(bass_path if bass_stem else audio_path, 30.0, 400.0), fps, total_frames,
+                              stem="bass" if bass_stem else "mix-low", max_hz=400.0)
+        if has(vocal_path):
+            notes += detect_notes(decode_band(vocal_path, 80.0, 1200.0), fps, total_frames, stem="vocals",
+                                  min_hz=80.0, max_hz=1000.0)
+        notes.sort(key=lambda n: n.startFrame)
+    except Exception as e:
+        logger.warning(f"Note detection skipped: {e}")
 
-                sum_sq = sum(s * s for s in chunk)
-                rms = math.sqrt(sum_sq / len(chunk))
-                frame_energies.append(rms)
+    # Per-stem spectral bands for the Resonant Bodies style.
+    try:
+        bands = body_bands(
+            {"bass": bass_path if has(bass_path) else None, "drums": drums_path if has(drums_path) else None,
+             "vocals": vocal_path if has(vocal_path) else None, "other": other_path if has(other_path) else None},
+            audio_path, fps, total_frames,
+        )
+    except Exception as e:
+        logger.warning(f"Body bands skipped: {e}")
+        bands = {}
 
-            max_val = max(frame_energies) if frame_energies else 1.0
-            if max_val > 0.001:
-                return [round(min(1.0, e / max_val), 4) for e in frame_energies]
-            return [0.0] * total_frames
-        except Exception as e:
-            logger.warning(f"Error extracting band RMS ({filter_str}): {e}")
-            return [0.0] * total_frames
-
-    # Extract Bass: isolated bass stem if available, else lowpass master
-    bass_target = bass_path if (bass_path and os.path.exists(bass_path)) else audio_path
-    bass_filter = "volume=1.0" if (bass_path and os.path.exists(bass_path)) else "lowpass=f=250,acompressor=threshold=-18dB:ratio=3"
-    bass_raw = get_band_rms(bass_target, bass_filter)
-
-    # Extract Mids
-    mids_raw = get_band_rms(audio_path, "highpass=f=250,lowpass=f=4000")
-
-    # Extract Treble / Shimmer
-    treble_target = other_path if (other_path and os.path.exists(other_path)) else audio_path
-    treble_filter = "highpass=f=4000,lowpass=f=16000"
-    treble_raw = get_band_rms(treble_target, treble_filter)
-
-    # Isolated Drums Energy: drums stem if available, else transient-focused percussion band
-    drums_target = drums_path if (drums_path and os.path.exists(drums_path)) else audio_path
-    drums_filter = "volume=1.0" if (drums_path and os.path.exists(drums_path)) else "highpass=f=60,lowpass=f=8000,acompressor=threshold=-16dB:ratio=4"
-    drums_raw = get_band_rms(drums_target, drums_filter)
-
-    # Macro overall track energy
-    macro_raw = get_band_rms(audio_path, "volume=1.0")
-
-    # Isolated vocal energy curve
-    vocal_target = vocal_path if (vocal_path and os.path.exists(vocal_path)) else audio_path
-    vocal_filter = "volume=1.0" if (vocal_path and os.path.exists(vocal_path)) else "highpass=f=200,lowpass=f=3500"
-    vocal_raw = get_band_rms(vocal_target, vocal_filter)
-
-    # Apply exponential smoothing
-    def smooth(arr: List[float], alpha: float = 0.35) -> List[float]:
-        if not arr:
-            return arr
-        smoothed = [arr[0]]
-        for v in arr[1:]:
-            smoothed.append(round(alpha * v + (1.0 - alpha) * smoothed[-1], 4))
-        return smoothed
-
-    bass_curve = smooth(bass_raw, alpha=0.45)
-    mids_curve = smooth(mids_raw, alpha=0.35)
-    treble_curve = smooth(treble_raw, alpha=0.30)
-    vocal_curve = smooth(vocal_raw, alpha=0.40)
-    drums_curve = smooth(drums_raw, alpha=0.50)
-    macro_curve = smooth(macro_raw, alpha=0.25)
-
-    # Detect transient drops/kicks
-    transients: List[int] = []
-    transient_source = drums_raw if drums_path else bass_raw
-    for i in range(1, len(transient_source) - 1):
-        if transient_source[i] > 0.45 and transient_source[i] > transient_source[i - 1] and transient_source[i] >= transient_source[i + 1]:
-            transients.append(i)
-
-    # Rhythm & Musical Key: Use Music DNA if available, else local adapter fallback
+    # Rhythm: never invent a grid. Unknown stays unknown.
+    rhythm_source = "unknown"
+    bpm: Optional[float] = None
+    beat_times: List[float] = []
+    beat_frames: List[int] = []
+    downbeat_frames: List[int] = []
+    downbeats_assumed = False
+    musical_key = ""
     if dna_data and isinstance(dna_data, dict) and dna_data.get("bpm"):
-        bpm = float(dna_data.get("bpm", 120.0))
-        beat_frames = [f for f in dna_data.get("beat_frames", []) if f < total_frames]
-        downbeat_frames = [f for f in dna_data.get("downbeat_frames", []) if f < total_frames]
-        musical_key = dna_data.get("musical_key", "C Major")
+        rhythm_source = "broker"
+        bpm = float(dna_data["bpm"])
+        beat_times = [float(t) for t in dna_data.get("beat_times", [])] or \
+            [f / fps for f in dna_data.get("beat_frames", [])]
+        musical_key = str(dna_data.get("musical_key") or "")
     else:
         rhythm = AudioIntelligenceAdapter.extract_rhythm_and_beats(audio_path, fps=fps)
-        bpm = rhythm.get("bpm", 120.0)
-        beat_frames = [f for f in rhythm.get("beat_frames", []) if f < total_frames]
-        downbeat_frames = [f for f in rhythm.get("downbeat_frames", []) if f < total_frames]
-        musical_key = "C Major"
+        if rhythm.get("status") == "measured":
+            rhythm_source = "estimated"
+            bpm = float(rhythm["bpm"])
+            beat_times = [float(t) for t in rhythm.get("beats_sec", [])]
+    beat_frames = [f for f in (int(round(t * fps)) for t in beat_times) if 0 <= f < total_frames]
+
+    meter_beats: Optional[int] = None
+    riff_cycle = None
+    if beat_times and onset_analysis.times:
+        meter = estimate_meter(beat_times, onset_analysis.times, onset_analysis.strengths)
+        if meter is not None:
+            meter_beats = meter.beats_per_bar
+            downbeat_frames = [f for i, f in enumerate(beat_frames) if i % meter.beats_per_bar == meter.downbeat_phase]
+        riff_cycle = estimate_riff_cycle(beat_times, onset_analysis.times, onset_analysis.strengths, fps)
+    if meter_beats is None and beat_frames:
+        # No measured meter: say so instead of presenting "every 4th beat" as fact.
+        downbeat_frames = beat_frames[::4]
+        downbeats_assumed = True
 
     return AudioMultibandFeatures(
         bass=bass_curve,
@@ -190,6 +232,13 @@ def extract_multiband_features_ffmpeg(
         drumsEnergy=drums_curve,
         macroEnergy=macro_curve,
         musicalKey=musical_key,
+        rhythmSource=rhythm_source,
+        downbeatsAssumed=downbeats_assumed,
+        meterBeats=meter_beats,
+        onsets=onsets,
+        notes=notes,
+        riffCycle=riff_cycle,
+        bodyBands=bands,
     )
 
 
@@ -317,6 +366,7 @@ class AudioFeatureExtractor:
         message_id: int = 0,
         pre_extracted_stems: Optional[Dict[str, str]] = None,
         show_lyrics: bool = True,
+        lyric_mode: str = "subtitles",
     ) -> RenderManifest:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -427,6 +477,14 @@ class AudioFeatureExtractor:
         features.transients = sorted(list(set(int(f) for f in features.transients if 0 <= f < total_frames)))
         features.beatFrames = sorted(list(set(int(f) for f in features.beatFrames if 0 <= f < total_frames)))
         features.downbeatFrames = sorted(list(set(int(f) for f in features.downbeatFrames if 0 <= f < total_frames)))
+        features.notes = sorted(
+            (n for n in features.notes if 0 <= n.startFrame < n.endFrame <= total_frames and n.pitchHz > 0),
+            key=lambda n: n.startFrame,
+        )
+        features.onsets = sorted(
+            (o for o in features.onsets if 0 <= o.frame < total_frames and 0.0 <= o.strength <= 1.0),
+            key=lambda o: o.frame,
+        )
 
         # Guarantee curve arrays match total_frames exactly
         for curve_name in ["bass", "mids", "treble", "vocalEnergy", "drumsEnergy", "macroEnergy"]:
@@ -462,7 +520,7 @@ class AudioFeatureExtractor:
                 bassStemUri=bass_stem_path,
                 features=features,
             ),
-            lyrics=LyricsConfig(lines=sanitized_lyrics),
+            lyrics=LyricsConfig(lines=sanitized_lyrics, mode=lyric_mode if show_lyrics else "off"),
             environment={
                 "concurrency": 2,
                 "gpuBackend": "angle",

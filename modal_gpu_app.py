@@ -62,6 +62,9 @@ image = (
     # Same CUDA base as the Vast instance (see vast_lifecycle.py).
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
+        # diffq (an audio-separator dependency) compiles a C extension, and this Python
+        # build records clang as its compiler, so both toolchains are installed.
+        "build-essential", "clang",
         "curl", "ca-certificates", "gnupg", "ffmpeg",
         "libnss3", "libnspr4", "libatk1.0-0", "libatk-bridge2.0-0", "libxcomposite1",
         "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1", "libxkbcommon0",

@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { randomUUID } from "node:crypto";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
@@ -307,7 +308,8 @@ async function runRenderJob(jobId: string, body: any): Promise<string> {
       pixelFormat: "yuv420p",
       outputLocation: outPath,
       inputProps,
-      concurrency: 2,
+      // Remotion rejects more than the machine's core count (a Modal container can report 1).
+      concurrency: Math.max(1, Math.min(2, os.cpus().length)),
       onProgress: ({ renderedFrames }) => {
         const pct = Math.min(100, Math.round((renderedFrames / totalFrames) * 100));
         const currentJob = jobs.get(jobId);

@@ -17,7 +17,12 @@ from bot.services.container_ledger import is_live, last_active_at
 # Dollars per hour. Source: third-party summary of modal.com/pricing (July 2026):
 # https://www.spheron.network/blog/modal-gpu-pricing-2026-per-second-billing/
 # Verify against https://modal.com/pricing and override with MODAL_GPU_RATE_PER_SECOND.
-# CPU and memory are billed separately by Modal; the bill reconciliation covers them.
+# CPU and memory are billed on top of the GPU (rates from the same July 2026 summaries;
+# verify at modal.com/pricing). Defaults match modal_gpu_app.py.
+CPU_DOLLARS_PER_CORE_SECOND = 0.0000131
+MEMORY_DOLLARS_PER_GIB_SECOND = 0.00000222
+DEFAULT_CPU_CORES = 4.0
+DEFAULT_MEMORY_MB = 8192
 GPU_DOLLARS_PER_HOUR = {
     "T4": 0.59,
     "L4": 0.80,
@@ -43,14 +48,17 @@ class BudgetExceeded(RuntimeError):
 
 
 def rate_per_second(gpu_type: Optional[str] = None) -> float:
-    """GPU dollars per second. An unknown GPU type is priced as the most expensive one."""
+    """Container dollars per second: GPU + CPU + memory. An unknown GPU is priced as the dearest."""
     override = os.environ.get("MODAL_GPU_RATE_PER_SECOND", "").strip()
     if override:
         return float(override)
     spec = (gpu_type or os.environ.get("MODAL_GPU_TYPE", "L4")).strip().upper()
     name, _, count = spec.partition(":")
     per_hour = GPU_DOLLARS_PER_HOUR.get(name, max(GPU_DOLLARS_PER_HOUR.values()))
-    return per_hour * (int(count) if count.isdigit() else 1) / 3600.0
+    gpu = per_hour * (int(count) if count.isdigit() else 1) / 3600.0
+    cores = float(os.environ.get("MODAL_CPU", DEFAULT_CPU_CORES))
+    gib = float(os.environ.get("MODAL_MEMORY_MB", DEFAULT_MEMORY_MB)) / 1024.0
+    return gpu + cores * CPU_DOLLARS_PER_CORE_SECOND + gib * MEMORY_DOLLARS_PER_GIB_SECOND
 
 
 def scaledown_seconds() -> float:

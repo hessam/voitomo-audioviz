@@ -41,6 +41,10 @@ GPU_TYPE = os.environ.get("MODAL_GPU_TYPE", "L4")
 # 60s is a starting point, not a measurement: read the real cold start from
 # `python3 -m bot.services.modal_gpu` and set this near it.
 SCALEDOWN_SECONDS = int(os.environ.get("MODAL_SCALEDOWN_SECONDS", "60"))
+# Chromium rendering needs real CPU and memory; Modal bills both on top of the GPU.
+# Keep these defaults in step with bot/services/gpu_cost.py (the cost estimate).
+CPU_CORES = float(os.environ.get("MODAL_CPU", "4"))
+MEMORY_MB = int(os.environ.get("MODAL_MEMORY_MB", "8192"))
 REMOTE_ROOT = "/root/audioviz"
 RENDERER_PORT = 4001
 AI_PORT = 5001
@@ -62,6 +66,9 @@ image = (
     # Same CUDA base as the Vast instance (see vast_lifecycle.py).
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
+        # diffq (an audio-separator dependency) compiles a C extension, and this Python
+        # build records clang as its compiler, so both toolchains are installed.
+        "build-essential", "clang",
         "curl", "ca-certificates", "gnupg", "ffmpeg",
         "libnss3", "libnspr4", "libatk1.0-0", "libatk-bridge2.0-0", "libxcomposite1",
         "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1", "libxkbcommon0",
@@ -97,6 +104,8 @@ app = modal.App(APP_NAME)
 @app.function(
     image=image,
     gpu=GPU_TYPE,
+    cpu=CPU_CORES,
+    memory=MEMORY_MB,
     timeout=4 * 60 * 60,
     scaledown_window=SCALEDOWN_SECONDS,
     # Stems live on this container's disk and are downloaded after separation,

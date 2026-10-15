@@ -35,3 +35,4 @@ rendered_*.png
 
 # Local Modal credentials; never commit
 modal-api.txt
+modal-proxy.txt

@@ -101,17 +101,25 @@ class TestCostModel(unittest.TestCase):
         patcher = patch.dict(os.environ)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for key in ("MODAL_GPU_RATE_PER_SECOND", "MODAL_GPU_TYPE", "MODAL_SCALEDOWN_SECONDS", "MODAL_DAILY_CAP_USD"):
+        for key in ("MODAL_GPU_RATE_PER_SECOND", "MODAL_GPU_TYPE", "MODAL_SCALEDOWN_SECONDS", "MODAL_DAILY_CAP_USD", "MODAL_CPU", "MODAL_MEMORY_MB"):
             os.environ.pop(key, None)
 
-    def test_known_gpu_rate(self):
-        self.assertAlmostEqual(gpu_cost.rate_per_second("L4"), 0.80 / 3600)
+    # Default container: 4 cores and 8 GiB on top of the GPU.
+    OVERHEAD = 4 * 0.0000131 + 8 * 0.00000222
+
+    def test_rate_is_gpu_plus_cpu_plus_memory(self):
+        self.assertAlmostEqual(gpu_cost.rate_per_second("L4"), 0.80 / 3600 + self.OVERHEAD)
+
+    def test_cpu_and_memory_follow_the_deployed_size(self):
+        os.environ.update(MODAL_CPU="1", MODAL_MEMORY_MB="1024")
+        self.assertAlmostEqual(gpu_cost.rate_per_second("L4"), 0.80 / 3600 + 0.0000131 + 0.00000222)
 
     def test_unknown_gpu_is_priced_as_the_most_expensive(self):
-        self.assertAlmostEqual(gpu_cost.rate_per_second("QuantumX"), max(gpu_cost.GPU_DOLLARS_PER_HOUR.values()) / 3600)
+        expected = max(gpu_cost.GPU_DOLLARS_PER_HOUR.values()) / 3600 + self.OVERHEAD
+        self.assertAlmostEqual(gpu_cost.rate_per_second("QuantumX"), expected)
 
-    def test_gpu_count_multiplies_the_rate(self):
-        self.assertAlmostEqual(gpu_cost.rate_per_second("H100:2"), 2 * 3.95 / 3600)
+    def test_gpu_count_multiplies_only_the_gpu_part(self):
+        self.assertAlmostEqual(gpu_cost.rate_per_second("H100:2"), 2 * 3.95 / 3600 + self.OVERHEAD)
 
     def test_rate_override_wins(self):
         os.environ["MODAL_GPU_RATE_PER_SECOND"] = "0.5"

@@ -11,9 +11,7 @@ import { useThreeScene } from "./useThreeScene";
  * nearest still line from its rest position with a fixed number of Newton steps, so any frame (seek,
  * parallel worker) draws identically. Pattern maths: see cymaticModel.ts.
  */
-const GRAINS_PER_SIDE = 260;
 const PLATE_SIZE = 6.0;
-const SEED = 20241016;
 
 const modeGLSL = `
 uniform vec4 uModes[${MAX_MODES}];   // (n, m, weight, 0)
@@ -35,72 +33,46 @@ vec3 plate(vec2 p) {
 }
 `;
 
-const grainVertex = `
-${modeGLSL}
-uniform float uAgit;
-uniform float uPatterned;
-uniform float uScale;
-attribute vec2 aRest;
-attribute vec3 aSeed;
-varying float vLift;
-varying float vCalm;
-
-void main() {
-  vec2 p = aRest;
-  float settled = 1.0;
-  if (uPatterned > 0.0) {
-    for (int i = 0; i < 16; i++) {
-      vec3 f = plate(p);
-      vec2 g = f.yz;
-      vec2 step = -f.x * g / (dot(g, g) + 0.06);
-      float len = length(step);
-      if (len > 0.07) step *= 0.07 / len;
-      p = clamp(p + 0.85 * step, 0.0, 1.0);
-    }
-    settled = 1.0 - smoothstep(0.0, 0.5, abs(plate(p).x));
-  }
-  // Hit agitation: grains are thrown up and sideways, then fall back as it decays.
-  p += (aSeed.xy - 0.5) * (0.003 + 0.30 * uAgit * aSeed.z);
-  p = clamp(p, 0.0, 1.0);
-  float lift = uAgit * (0.15 + 1.5 * aSeed.z * aSeed.z) * 0.55;
-  vec3 world = vec3((p.x - 0.5) * ${PLATE_SIZE.toFixed(2)}, (p.y - 0.5) * ${PLATE_SIZE.toFixed(2)}, 0.03 + lift);
-  vec4 mv = modelViewMatrix * vec4(world, 1.0);
-  gl_Position = projectionMatrix * mv;
-  gl_PointSize = clamp((2.1 + 1.2 * min(uAgit, 1.0) + 1.4 * aSeed.z) * uScale / -mv.z, 1.6, 7.0);
-  vLift = lift;
-  vCalm = settled;
-}
-`;
-
-const grainFragment = `
-varying float vLift;
-varying float vCalm;
-void main() {
-  vec2 c = gl_PointCoord - 0.5;
-  float d = length(c);
-  if (d > 0.5) discard;
-  float soft = smoothstep(0.5, 0.12, d);
-  vec3 sand = mix(vec3(0.55, 0.46, 0.30), vec3(1.0, 0.86, 0.55), clamp(vCalm * 0.7 + vLift * 1.4, 0.0, 1.0));
-  gl_FragColor = vec4(sand, soft * (0.16 + 0.16 * vCalm + 0.3 * min(vLift, 1.0)));
-}
-`;
-
-const plateVertex = `
+const sandVertex = `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
 `;
 
-const plateFragment = `
+/*
+ * Sand is drawn per pixel, not as particles: a grain sits on a still line where the plate's
+ * displacement z is zero. The line width is measured in plate units from |z| / |grad z|, so it stays
+ * a crisp, anti-aliased line at any output size. Hits widen the lines and scatter a few grains.
+ */
+const sandFragment = `
 ${modeGLSL}
 uniform float uPatterned;
+uniform float uAgit;
+uniform float uTime;
 varying vec2 vUv;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
 void main() {
-  vec3 base = mix(vec3(0.075, 0.080, 0.098), vec3(0.030, 0.033, 0.042), distance(vUv, vec2(0.5)) * 1.5);
-  // Anti-nodes (where the plate moves most) glow faintly cool; nodal lines stay dark.
-  float amp = uPatterned > 0.0 ? clamp(abs(plate(vUv).x) * 0.6, 0.0, 1.0) : 0.0;
-  vec3 col = base + vec3(0.03, 0.065, 0.12) * amp;
-  float edge = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
-  col += vec3(0.16, 0.19, 0.26) * (1.0 - smoothstep(0.0, 0.008, edge));
+  vec2 p = vUv;
+  vec3 zg = uPatterned > 0.0 ? plate(p) : vec3(0.0);
+  float grad = max(length(zg.yz), 1e-4);
+  // Distance to the nearest still line, in plate units (0..0.5).
+  float dist = abs(zg.x) / grad;
+  float width = 0.0042 + 0.006 * min(uAgit, 1.0);
+  float edge = fwidth(dist) * 1.2 + 1e-4;
+  float line = 1.0 - smoothstep(width - edge, width + edge, dist);
+  float glow = exp(-dist / (0.02 + 0.01 * min(uAgit, 1.0))) * 0.10;
+
+  // Sand grain texture: fine, stable per pixel (never flickers from the time value).
+  float grain = 0.45 + 0.55 * hash(floor(p * vec2(960.0, 540.0)));
+  // Hit scatter: a sparse set of grains thrown off the lines, kept inside the plate.
+  float scatterCell = hash(floor(p * 420.0));
+  float scatter = step(0.994 - 0.006 * min(uAgit, 1.0), scatterCell) * min(uAgit, 1.0) * 0.6;
+
+  vec3 sand = vec3(1.0, 0.84, 0.50) * (line * 0.9 * grain + glow + scatter);
+  vec3 plateCol = vec3(0.075, 0.080, 0.098) - vec3(0.045, 0.047, 0.056) * distance(p, vec2(0.5)) * 1.5;
+  float edgeLine = 1.0 - smoothstep(0.0, 0.006, min(min(p.x, 1.0 - p.x), min(p.y, 1.0 - p.y)));
+  vec3 col = plateCol + vec3(0.16, 0.19, 0.26) * edgeLine + sand;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -110,16 +82,6 @@ const noteName = (hz: number) => {
   const midi = Math.round(69 + 12 * Math.log2(hz / 440));
   return `${NOTE_NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
 };
-
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 interface Props { features: AudioMultibandFeatures; intensity?: number }
 
@@ -140,34 +102,13 @@ export const CymaticPlateVisualizer: React.FC<Props> = ({ features, intensity = 
     camera.lookAt(0, -0.45, 0);
 
     const modeUniform = Array.from({ length: MAX_MODES }, () => new THREE.Vector4(0, 0, 0, 0));
-    const shared = { uModes: { value: modeUniform }, uPatterned: { value: 0 } };
-
-    const plate = new THREE.Mesh(
-      new THREE.PlaneGeometry(PLATE_SIZE, PLATE_SIZE),
-      new THREE.ShaderMaterial({ vertexShader: plateVertex, fragmentShader: plateFragment, uniforms: shared }),
-    );
-    scene.add(plate);
-
-    const rand = mulberry32(SEED);
-    const count = GRAINS_PER_SIDE * GRAINS_PER_SIDE;
-    const rest = new Float32Array(count * 2), seed = new Float32Array(count * 3), position = new Float32Array(count * 3);
-    for (let i = 0; i < GRAINS_PER_SIDE; i++) for (let j = 0; j < GRAINS_PER_SIDE; j++) {
-      const k = i * GRAINS_PER_SIDE + j;
-      rest[k * 2] = (i + rand()) / GRAINS_PER_SIDE;
-      rest[k * 2 + 1] = (j + rand()) / GRAINS_PER_SIDE;
-      seed[k * 3] = rand(); seed[k * 3 + 1] = rand(); seed[k * 3 + 2] = rand();
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
-    geometry.setAttribute("aRest", new THREE.BufferAttribute(rest, 2));
-    geometry.setAttribute("aSeed", new THREE.BufferAttribute(seed, 3));
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 20);
-    const grainMaterial = new THREE.ShaderMaterial({
-      vertexShader: grainVertex, fragmentShader: grainFragment,
-      uniforms: { ...shared, uAgit: { value: 0 }, uScale: { value: height * 0.55 } },
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    const shared = { uModes: { value: modeUniform }, uPatterned: { value: 0 }, uAgit: { value: 0 }, uTime: { value: 0 } };
+    const sandMaterial = new THREE.ShaderMaterial({
+      vertexShader: sandVertex, fragmentShader: sandFragment, uniforms: shared,
+      extensions: { derivatives: true } as any,
     });
-    scene.add(new THREE.Points(geometry, grainMaterial));
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(PLATE_SIZE, PLATE_SIZE), sandMaterial);
+    scene.add(plate);
 
     return {
       draw(f: number) {
@@ -180,13 +121,12 @@ export const CymaticPlateVisualizer: React.FC<Props> = ({ features, intensity = 
           strongest = Math.max(strongest, w);
         }
         shared.uPatterned.value = strongest > 0.02 ? 1 : 0;
-        grainMaterial.uniforms.uAgit.value = timeline.agitation[index] * drive;
+        shared.uAgit.value = timeline.agitation[index] * drive;
+        shared.uTime.value = f / 30;
         renderer.render(scene, camera);
       },
       dispose() {
-        geometry.dispose();
-        grainMaterial.dispose();
-        (plate.material as THREE.Material).dispose();
+        sandMaterial.dispose();
         plate.geometry.dispose();
         renderer.dispose();
       },

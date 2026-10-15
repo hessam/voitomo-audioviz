@@ -114,7 +114,8 @@ def transcribe_lyrics_gpu(vocal_audio_path: str, ai_url: str, user_lyrics: Optio
         if language:
             data["language"] = language
         logger.info(f"🚀 Offloading singing voice transcription to GPU at {ai_url}/ai/transcribe (Whisper large-v3 CUDA)...")
-        resp = requests.post(f"{ai_url}/ai/transcribe", files=files, data=data, timeout=120)
+        from bot.services.gpu_provider import gpu_request_headers
+        resp = requests.post(f"{ai_url}/ai/transcribe", files=files, data=data, headers=gpu_request_headers(), timeout=120)
         if resp.status_code == 200:
             res_data = resp.json()
             if res_data.get("status") == "success":
@@ -138,7 +139,8 @@ def transcribe_lyrics(vocal_audio_path: str, user_lyrics: Optional[str] = None, 
     Strictly offloads to GPU AI endpoint (Whisper large-v3 CUDA) at port 4002.
     Zero Hetzner broker CPU offload.
     """
-    ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL") or "http://127.0.0.1:4002"
+    from bot.services.gpu_provider import gpu_base_url
+    ai_url = gpu_base_url()
     try:
         return transcribe_lyrics_gpu(vocal_audio_path, ai_url, user_lyrics, language)
     except Exception as e:
@@ -153,9 +155,9 @@ async def transcribe_lyrics_managed(
     language: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Keep the GPU leased until the synchronous transcription request ends."""
-    from bot.services.vast_lifecycle import VastLifecycleManager
+    from bot.services.gpu_provider import get_gpu_manager
 
-    async with VastLifecycleManager.get_instance().managed_gpu():
+    async with get_gpu_manager().managed_gpu():
         request = asyncio.create_task(asyncio.to_thread(
             transcribe_lyrics, vocal_audio_path, user_lyrics, language
         ))

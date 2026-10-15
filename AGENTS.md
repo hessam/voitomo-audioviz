@@ -18,14 +18,14 @@ Nothing flows backward. Servers never hold their own version of the code.
 ## Stack
 - **Bot (Python 3.11+):** aiogram Telegram bot in `bot/` (routers, services). Entry points: `audioviz_bot_run.py`, `bot_run.py`, `bot/main.py`.
 - **Renderer (TypeScript, Node 20):** Remotion/three.js render server in `renderer/`, entry `renderer/server.ts`.
-- **GPU workers:** Vast.ai lifecycle in `bot/services/vast_lifecycle.py`. Whisper and alignment run on GPU via `vast_ai_service.py`.
+- **GPU workers:** primary is Modal (`modal_gpu_app.py`, client in `bot/services/modal_gpu.py`); secondary is Vast.ai (`bot/services/vast_lifecycle.py`). `GPU_PROVIDER` selects one (`bot/services/gpu_provider.py`). Whisper and alignment run on GPU via `vast_ai_service.py` on either.
 - **Docker:** not used. Services run from shell scripts (`start.sh`, `run_audioviz_supervisor.sh`, `gpu_start_services.sh`).
 
 ## Setup, test, lint
 Python (tests use `unittest` and `pytest`; CI installs pytest):
 ```bash
 pip install pytest pytest-asyncio pydantic aiohttp aiogram librosa soundfile
-PYTHONPATH=. python3 -m unittest tests.test_audio_gpu_workflow tests.test_gpu_lifecycle
+PYTHONPATH=. python3 -m unittest tests.test_audio_gpu_workflow tests.test_gpu_lifecycle tests.test_gpu_provider tests.test_container_ledger tests.test_modal_cost_control
 PYTHONPATH=. python -m pytest tests/test_music_engine.py tests/test_end_to_end_manifest.py
 ```
 

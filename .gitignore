@@ -32,3 +32,6 @@ logs/
 renderer/rendered_particle_sphere.png
 rendered_*.png
 .deployed_sha
+
+# Local Modal credentials; never commit
+modal-api.txt

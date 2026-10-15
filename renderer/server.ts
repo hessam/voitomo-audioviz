@@ -10,9 +10,31 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 const app = express();
+// Activity for the Modal lifecycle watcher. Every request, including the /ai/* proxy, passes here;
+// /health is excluded so the watcher's own polling never counts as activity.
+let inFlightRequests = 0;
+let lastActivityAt = Date.now();
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  inFlightRequests += 1;
+  lastActivityAt = Date.now();
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    inFlightRequests -= 1;
+    lastActivityAt = Date.now();
+  };
+  res.on("finish", finish);
+  res.on("close", finish);
+  next();
+});
+
 app.use(express.json({ limit: "50mb" }));
 
 const PORT = 4001;
+// Loopback on the Vast box; the Modal container sets RENDERER_BIND_HOST=0.0.0.0 so its proxy can reach it.
+const HOST = process.env.RENDERER_BIND_HOST || "127.0.0.1";
 const PROFILES_DIR = "/root/workspace/video_profiles";
 const OUT_DIR = fs.existsSync("/opt/hermes-vault/motion/renders")
   ? "/opt/hermes-vault/motion/renders"
@@ -102,7 +124,8 @@ if (typeof setInterval !== "undefined") {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", bundled: serveUrl !== null });
+  const activeJobs = [...jobs.values()].filter((j) => j.status === "queued" || j.status === "rendering").length;
+  res.json({ status: "ok", bundled: serveUrl !== null, activeJobs, inFlight: inFlightRequests, lastActivityAt });
 });
 
 app.get("/render/jobs/:id", (req, res) => {
@@ -402,7 +425,7 @@ app.post("/render", async (req, res) => {
   }
 });
 
-app.listen(PORT, "127.0.0.1", async () => {
+app.listen(PORT, HOST, async () => {
   console.log(`🚀 Render server on port ${PORT}`);
   try {
     await ensureBundle();

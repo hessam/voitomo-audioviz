@@ -22,6 +22,10 @@ class TestAudioGpuWorkflow(unittest.IsolatedAsyncioTestCase):
             with open(path, "wb") as stream:
                 stream.write(b"mock inference input")
         self.manager = VastLifecycleManager()
+        # These lease tests exercise the Vast backend; Modal is the default provider.
+        env = patch.dict(os.environ, {"GPU_PROVIDER": "vast"})
+        env.start()
+        self.addCleanup(env.stop)
 
         async def api(method, endpoint, data=None):
             if method == "GET":

@@ -21,29 +21,31 @@ from bot.services.alignment import patch_word, parse_edit_command, realign_trans
 logger = logging.getLogger(__name__)
 router = Router(name="audioviz")
 
-RENDERER_URL = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("RENDERER_URL", "http://127.0.0.1:4002")
 VAULT_STORAGE_PATH = os.environ.get("VAULT_STORAGE_PATH", "/opt/hermes-vault/motion/renders")
 
 @router.message(Command("gpu", "gpu_status"))
 async def cmd_gpu_status(message: Message):
-    from bot.services.vast_lifecycle import VastLifecycleManager
-    mgr = VastLifecycleManager.get_instance()
-    inst = await mgr.get_active_instance()
-    if not inst:
-        await message.reply("❌ No Vast GPU instance configured.")
-        return
-    st = inst.get("actual_status", "unknown")
-    gpu = inst.get("gpu_name", "RTX 3060")
-    cost = inst.get("dph_total", 0.05)
-    idle = int(time.time() - mgr.last_active_time)
-    
-    text = (
-        f"🖥️ **Vast GPU Status:** `{st.upper()}`\n"
-        f"• **Hardware:** {gpu} (12GB VRAM)\n"
-        f"• **Hourly Rate:** ${cost:.3f}/hr\n"
-        f"• **Idle Time:** {idle}s / 300s limit\n\n"
-        f"Instance auto-stops when idle for >5 minutes to eliminate waste."
-    )
+    from bot.services.gpu_provider import active_provider, get_gpu_manager
+    mgr = get_gpu_manager()
+    if active_provider() == "modal":
+        text = await mgr.status_text()
+    else:
+        inst = await mgr.get_active_instance()
+        if not inst:
+            await message.reply("❌ No Vast GPU instance configured.")
+            return
+        st = inst.get("actual_status", "unknown")
+        gpu = inst.get("gpu_name", "RTX 3060")
+        cost = inst.get("dph_total", 0.05)
+        idle = int(time.time() - mgr.last_active_time)
+
+        text = (
+            f"🖥️ **Vast GPU Status:** `{st.upper()}`\n"
+            f"• **Hardware:** {gpu} (12GB VRAM)\n"
+            f"• **Hourly Rate:** ${cost:.3f}/hr\n"
+            f"• **Idle Time:** {idle}s / 300s limit\n\n"
+            f"Instance auto-stops when idle for >5 minutes to eliminate waste."
+        )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="⚡ Wake GPU", callback_data="gpu:wake"),
@@ -55,16 +57,16 @@ async def cmd_gpu_status(message: Message):
 @router.callback_query(F.data.startswith("gpu:"))
 async def handle_gpu_callback(callback: CallbackQuery):
     action = callback.data.split(":")[1]
-    from bot.services.vast_lifecycle import VastLifecycleManager
-    mgr = VastLifecycleManager.get_instance()
+    from bot.services.gpu_provider import get_gpu_manager
+    mgr = get_gpu_manager()
     if action == "wake":
         await callback.answer("Waking GPU...")
         if callback.message:
-            await callback.message.edit_text("⏳ Waking up GPU instance (~20-30s)...")
+            await callback.message.edit_text("⏳ Waking up GPU...")
         ready = await mgr.ensure_gpu_ready()
         if callback.message:
             if ready:
-                await callback.message.edit_text("✅ **GPU is ONLINE and tunnel is active!**", parse_mode="Markdown")
+                await callback.message.edit_text("✅ **GPU is ONLINE and ready!**", parse_mode="Markdown")
             else:
                 await callback.message.edit_text("⚠️ **GPU wake failed or resources busy.**", parse_mode="Markdown")
     elif action == "stop":
@@ -268,8 +270,8 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         await callback.message.edit_text(f"⏳ **Rendering {preset_id.upper()} Visualizer...**\n\n1. Extracting multiband FFT arrays\n2. Evaluating deterministic WebGL frames", parse_mode="Markdown")
 
     try:
-        from bot.services.vast_lifecycle import VastLifecycleManager
-        VastLifecycleManager.get_instance().record_activity()
+        from bot.services.gpu_provider import get_gpu_manager
+        get_gpu_manager().record_activity()
     except Exception:
         pass
 
@@ -295,8 +297,8 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         manifest_dict = manifest.to_dict()
 
         # 2. Trigger Remotion render strictly on GPU renderer
-        from bot.services.vast_lifecycle import VastLifecycleManager
-        mgr = VastLifecycleManager.get_instance()
+        from bot.services.gpu_provider import gpu_base_url, gpu_request_headers, get_gpu_manager
+        mgr = get_gpu_manager()
 
         async def gpu_status_cb(msg: str):
             if callback.message:
@@ -308,11 +310,12 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         async with mgr.managed_gpu(status_callback=gpu_status_cb):
             total_render_timeout = max(3600, int(manifest.video.frameCount * 2.5))
             rendered_mp4 = None
-            async with aiohttp.ClientSession() as session:
+            renderer_url = gpu_base_url()
+            async with aiohttp.ClientSession(headers=gpu_request_headers()) as session:
                 # Upload master audio to GPU renderer via HTTP tunnel
                 master_audio = manifest_dict.get("audio", {}).get("masterUri")
                 if master_audio and os.path.exists(master_audio):
-                    upload_url = f"{RENDERER_URL}/upload?path={quote(master_audio)}"
+                    upload_url = f"{renderer_url}/upload?path={quote(master_audio)}"
                     logger.info(f"📤 Uploading audio to GPU renderer via tunnel: {master_audio}")
                     with open(master_audio, "rb") as f:
                         async with session.post(
@@ -327,7 +330,7 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
 
                 # Trigger render in async job mode
                 async with session.post(
-                    f"{RENDERER_URL}/render",
+                    f"{renderer_url}/render",
                     json={"manifest": manifest_dict, "jobId": job_id, "async": True},
                     timeout=aiohttp.ClientTimeout(total=60),
                 ) as resp:
@@ -346,7 +349,7 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                     mgr.record_activity()
                     try:
                         async with session.get(
-                            f"{RENDERER_URL}/render/jobs/{job_id}",
+                            f"{renderer_url}/render/jobs/{job_id}",
                             timeout=aiohttp.ClientTimeout(total=10),
                         ) as status_resp:
                             if status_resp.status != 200:
@@ -356,7 +359,7 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
                             if st == "done":
                                 local_dest = os.path.join("/tmp/audioviz_work", f"{job_id}.mp4")
                                 os.makedirs("/tmp/audioviz_work", exist_ok=True)
-                                dl_url = f"{RENDERER_URL}/download/{job_id}"
+                                dl_url = f"{renderer_url}/download/{job_id}"
                                 logger.info(f"📥 Downloading rendered MP4 from GPU: {dl_url}...")
                                 async with session.get(dl_url, timeout=aiohttp.ClientTimeout(total=600)) as dl_resp:
                                     if dl_resp.status != 200:
@@ -512,13 +515,18 @@ async def handle_lyric_edit(message: Message, state: FSMContext):
         # Full text replacement aligned to acoustic audio timestamps
         from bot.services.audio_features import get_audio_duration_seconds
         from bot.services.audio_adapter import AudioIntelligenceAdapter
+        from bot.services.gpu_provider import gpu_base_url
         audio_p = cache_item.get("audio_path", "")
         vocal_p = cache_item.get("vocal_path")
         target_audio = vocal_p if vocal_p and os.path.exists(vocal_p) else audio_p
         total_dur = get_audio_duration_seconds(audio_p) if audio_p and os.path.exists(audio_p) else 0.0
 
-        ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL")
         realigned = []
+        try:
+            ai_url = gpu_base_url()
+        except RuntimeError as e:
+            logger.info(f"Remote GPU alignment unavailable, using local alignment: {e}")
+            ai_url = None
         if ai_url and target_audio and os.path.exists(target_audio):
             try:
                 gpu_align = await AudioIntelligenceAdapter.align_lyrics_gpu(

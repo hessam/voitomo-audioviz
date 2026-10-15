@@ -43,7 +43,8 @@ class AudioIntelligenceAdapter:
     @staticmethod
     async def separate_stems_gpu(audio_path: str, ai_url: str) -> Dict[str, str]:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
+        from bot.services.gpu_provider import gpu_request_headers
+        async with aiohttp.ClientSession(headers=gpu_request_headers()) as session:
             logger.info(f"🚀 Offloading stem separation to GPU at {ai_url}/ai/separate-stems (UVR-MDX-NET CUDA)...")
             data = aiohttp.FormData()
             with open(audio_path, "rb") as f:
@@ -84,9 +85,9 @@ class AudioIntelligenceAdapter:
         language: str = "fa",
         total_duration: Optional[float] = None
     ) -> Dict[str, Any]:
-        from bot.services.vast_lifecycle import VastLifecycleManager
+        from bot.services.gpu_provider import get_gpu_manager
 
-        async with VastLifecycleManager.get_instance().managed_gpu():
+        async with get_gpu_manager().managed_gpu():
             return await AudioIntelligenceAdapter._align_lyrics_ready(
                 audio_path, lyrics_text, ai_url, language, total_duration
             )
@@ -104,7 +105,8 @@ class AudioIntelligenceAdapter:
         Returns dict with 'words', 'alignment_score', 'duration', etc.
         """
         import aiohttp
-        async with aiohttp.ClientSession() as session:
+        from bot.services.gpu_provider import gpu_request_headers
+        async with aiohttp.ClientSession(headers=gpu_request_headers()) as session:
             logger.info(f"🚀 Offloading acoustic lyric forced alignment to GPU at {ai_url}/ai/align...")
             data = aiohttp.FormData()
             with open(audio_path, "rb") as f:
@@ -140,11 +142,12 @@ class AudioIntelligenceAdapter:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Input audio file not found: {audio_path}")
 
-        ai_url = os.environ.get("REMOTE_RENDERER_URL") or os.environ.get("AUDIOVIZ_AI_URL") or "http://127.0.0.1:4002"
+        from bot.services.gpu_provider import gpu_base_url, get_gpu_manager
+
+        ai_url = gpu_base_url()
 
         # An enclosing analysis lease can retain the GPU for transcription.
-        from bot.services.vast_lifecycle import VastLifecycleManager
-        mgr = VastLifecycleManager.get_instance()
+        mgr = get_gpu_manager()
         async with mgr.managed_gpu(status_callback=status_callback):
             if status_callback:
                 await status_callback("🎙 **Processing stems with Mel-Band RoFormer on GPU...**")
@@ -165,13 +168,13 @@ class AudioIntelligenceAdapter:
         language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Separate/download stems and transcribe before releasing the GPU."""
-        from bot.services.vast_lifecycle import VastLifecycleManager
+        from bot.services.gpu_provider import get_gpu_manager
         from bot.services.lyric_transcriber import transcribe_lyrics_managed
 
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Input audio file not found: {audio_path}")
 
-        async with VastLifecycleManager.get_instance().managed_gpu(status_callback):
+        async with get_gpu_manager().managed_gpu(status_callback):
             stems = await AudioIntelligenceAdapter.separate_stems_broker(
                 audio_path, status_callback=status_callback
             )

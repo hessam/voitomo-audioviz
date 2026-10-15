@@ -1,5 +1,9 @@
 import difflib
-from typing import List, Dict
+import re
+from typing import List, Dict, Optional
+
+MAX_OFFSET_MS = 5000
+_OFFSET_RE = re.compile(r"^\s*offset\s*([+-]?\d{1,5})\s*(?:ms)?\s*$", re.IGNORECASE)
 
 def patch_word(words: List[Dict], old_word: str, new_word: str) -> List[Dict]:
     """Replace a single word in the transcript while preserving timestamps exactly."""
@@ -25,6 +29,26 @@ def parse_edit_command(text: str):
     if old and new:
         return old, new
     return None
+
+def parse_offset_command(text: str) -> Optional[int]:
+    """Parse 'offset +120' / 'offset -80 ms'. Returns milliseconds, or None if not an offset command."""
+    match = _OFFSET_RE.match(text or "")
+    if not match:
+        return None
+    ms = int(match.group(1))
+    return ms if abs(ms) <= MAX_OFFSET_MS else None
+
+
+def shift_words(words: List[Dict], offset_ms: int) -> List[Dict]:
+    """Move every word later (positive) or earlier (negative); times never go below zero."""
+    delta = offset_ms / 1000.0
+    shifted = []
+    for w in words:
+        start = max(0.0, float(w.get("start", 0.0)) + delta)
+        end = max(start + 0.05, float(w.get("end", start)) + delta)
+        shifted.append({**w, "start": round(start, 3), "end": round(end, 3)})
+    return shifted
+
 
 def realign_transcript(orig_words: List[Dict], new_text: str, total_duration: float = None) -> List[Dict]:
     """

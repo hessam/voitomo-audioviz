@@ -1,28 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&display=swap');
-
-@font-face {
-  font-family: 'Dana';
-  src: local('Dana'), local('Dana Bold'), local('Dana-Bold'),
-       url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Bold.woff2') format('woff2');
-  font-weight: 700;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'Dana';
-  src: local('Dana Medium'), local('Dana-Medium'),
-       url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'Dana';
-  src: local('Dana Black'), local('Dana-Black'),
-       url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Black.woff2') format('woff2');
-  font-weight: 900;
-  font-style: normal;
-}
+/* Vazirmatn is bundled with the renderer (SIL Open Font License 1.1, see src/fonts/Vazirmatn-OFL.txt),
+   so renders never depend on the network for Persian text. "Dana" is kept as an alias for older components. */
+@font-face { font-family: 'Vazirmatn'; font-weight: 500; font-style: normal; font-display: block; src: url('./fonts/Vazirmatn-Medium.woff2') format('woff2'); }
+@font-face { font-family: 'Vazirmatn'; font-weight: 700; font-style: normal; font-display: block; src: url('./fonts/Vazirmatn-Bold.woff2') format('woff2'); }
+@font-face { font-family: 'Vazirmatn'; font-weight: 900; font-style: normal; font-display: block; src: url('./fonts/Vazirmatn-Black.woff2') format('woff2'); }
+@font-face { font-family: 'Dana'; font-weight: 500; font-style: normal; font-display: block; src: url('./fonts/Vazirmatn-Medium.woff2') format('woff2'); }
+@font-face { font-family: 'Dana'; font-weight: 700; font-style: normal; font-display: block; src: url('./fonts/Vazirmatn-Bold.woff2') format('woff2'); }
+@font-face { font-family: 'Dana'; font-weight: 900; font-style: normal; font-display: block; src: url('./fonts/Vazirmatn-Black.woff2') format('woff2'); }
 
 .tape-strip {
   display: inline-block;

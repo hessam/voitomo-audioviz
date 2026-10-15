@@ -2,10 +2,10 @@ import React from "react";
 import { AbsoluteFill, Audio } from "remotion";
 import { RenderManifest } from "../types/manifest";
 import { ParticleSphereVisualizer } from "./ParticleSphereVisualizer";
-import { QuantumIrisVisualizer } from "./QuantumIrisVisualizer";
-import { NeuralSynapseVisualizer } from "./NeuralSynapseVisualizer";
-import { MonolithFieldVisualizer } from "./MonolithFieldVisualizer";
-import { TypographyOverlay } from "../components/TypographyOverlay";
+import { PolymeterOrreryVisualizer } from "./PolymeterOrreryVisualizer";
+import { CymaticPlateVisualizer } from "./CymaticPlateVisualizer";
+import { ResonantBodiesVisualizer } from "./ResonantBodiesVisualizer";
+import { LyricLayer } from "../components/LyricLayer";
 
 export interface AudiovizRuntimeProps {
   manifest: RenderManifest;
@@ -21,16 +21,19 @@ export const AudiovizRuntime: React.FC<AudiovizRuntimeProps> = ({ manifest, audi
     transients: [],
   };
   const lyricLines = manifest?.lyrics?.lines || [];
+  const lyricMode = manifest?.lyrics?.mode ?? "subtitles";
+  // The Orrery keeps a clear disc in the middle for lyric-video text; every other style uses the lower band.
+  const lyricRegion = presetId === "orrery" && lyricMode === "video" ? "center" : "bottom";
   const resolvedAudio = audioSrc || manifest?.audio?.masterUri;
 
   const renderVisualizer = () => {
     switch (presetId) {
-      case "iris":
-        return <QuantumIrisVisualizer features={features} />;
-      case "neural":
-        return <NeuralSynapseVisualizer features={features} />;
-      case "monolith":
-        return <MonolithFieldVisualizer features={features} />;
+      case "orrery":
+        return <PolymeterOrreryVisualizer features={features} />;
+      case "cymatic":
+        return <CymaticPlateVisualizer features={features} />;
+      case "bodies":
+        return <ResonantBodiesVisualizer features={features} />;
       case "sphere":
       default:
         return <ParticleSphereVisualizer features={features} />;
@@ -42,8 +45,8 @@ export const AudiovizRuntime: React.FC<AudiovizRuntimeProps> = ({ manifest, audi
       {/* 1. 3D WebGL Audio-Reactive Canvas */}
       {renderVisualizer()}
 
-      {/* 2. Unified 3-Line Clamped Kinetic Typography Overlay */}
-      <TypographyOverlay lines={lyricLines} />
+      {/* 2. Shared Persian lyric layer: off, subtitles, or lyric video */}
+      <LyricLayer lines={lyricLines} mode={lyricMode} region={lyricRegion} />
 
       {/* 3. Audio Track */}
       {resolvedAudio && <Audio src={resolvedAudio} />}

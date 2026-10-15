@@ -5,7 +5,34 @@
  * - Immutable Pre-Render Manifest (100% precalculated features before Remotion frame capture)
  */
 
-export type VisualizerPresetId = "sphere" | "iris" | "neural" | "monolith";
+export type VisualizerPresetId = "sphere" | "orrery" | "cymatic" | "bodies";
+
+export type LyricMode = "off" | "subtitles" | "video";
+
+export type OnsetKind = "kick" | "snare" | "cymbal" | "other";
+
+/** A classified hit. `frame` is the first video frame allowed to show it (never earlier than the sound). */
+export interface OnsetEvent {
+  frame: number;
+  /** 0..1 relative to the strongest onset in the clip */
+  strength: number;
+  kind: OnsetKind;
+}
+
+export interface NoteEvent {
+  startFrame: number;
+  endFrame: number;
+  pitchHz: number;
+  stem?: string;
+  confidence?: number;
+}
+
+/** Repeating pattern length, in subdivision steps (for example 23 sixteenth notes). */
+export interface RiffCycle {
+  lengthSteps: number;
+  stepFrames: number;
+  confidence: number;
+}
 
 export interface AudioMultibandFeatures {
   /** 30 FPS normalized bass energy array [0.0, 1.0] */
@@ -16,8 +43,8 @@ export interface AudioMultibandFeatures {
   treble: number[];
   /** Frame indices where transient drum kicks or drops occur */
   transients: number[];
-  /** Detected musical tempo in BPM */
-  bpm?: number;
+  /** Detected musical tempo in BPM; null/undefined when unknown */
+  bpm?: number | null;
   /** Exact frame indices of quarter-note beats */
   beatFrames?: number[];
   /** 1st-beat-of-bar downbeats */
@@ -28,8 +55,22 @@ export interface AudioMultibandFeatures {
   drumsEnergy?: number[];
   /** 30 FPS structural build-up/drop curve */
   macroEnergy?: number[];
-  /** Harmonic key tonality (e.g. "D Minor") */
+  /** Harmonic key tonality (e.g. "D Minor"); empty when unknown */
   musicalKey?: string;
+  /** Where beatFrames came from */
+  rhythmSource?: "unknown" | "broker" | "estimated";
+  /** True when downbeatFrames is only "every 4th beat", not measured */
+  downbeatsAssumed?: boolean;
+  /** Beats per bar when measured or estimated */
+  meterBeats?: number | null;
+  /** Classified hit events */
+  onsets?: OnsetEvent[];
+  /** Pitched note events (optional) */
+  notes?: NoteEvent[];
+  /** Repeating riff length, when one was found */
+  riffCycle?: RiffCycle | null;
+  /** Per-stem spectral bands (frames x 12, 0..1). Only stems that exist are present. */
+  bodyBands?: Record<string, number[][]>;
 }
 
 export interface LyricWord {
@@ -76,6 +117,8 @@ export interface RenderManifest {
   };
   lyrics: {
     lines: LyricLine[];
+    /** off: no text; subtitles: lines near the bottom; video: lyrics lead and the style makes room for them */
+    mode?: LyricMode;
   };
   environment?: {
     containerDigest?: string;

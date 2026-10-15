@@ -3,9 +3,9 @@ import { Composition } from "remotion";
 import "./fonts.css";
 import { AudiovizRuntime, AudiovizRuntimeProps } from "./visualizers/AudiovizRuntime";
 import { ParticleSphereVisualizer } from "./visualizers/ParticleSphereVisualizer";
-import { QuantumIrisVisualizer } from "./visualizers/QuantumIrisVisualizer";
-import { NeuralSynapseVisualizer } from "./visualizers/NeuralSynapseVisualizer";
-import { MonolithFieldVisualizer } from "./visualizers/MonolithFieldVisualizer";
+import { PolymeterOrreryVisualizer } from "./visualizers/PolymeterOrreryVisualizer";
+import { CymaticPlateVisualizer } from "./visualizers/CymaticPlateVisualizer";
+import { ResonantBodiesVisualizer } from "./visualizers/ResonantBodiesVisualizer";
 
 const defaultEmptyFeatures = {
   bass: new Array(300).fill(0.2),
@@ -73,39 +73,39 @@ export const RemotionRoot: React.FC = () => (
       }}
     />
 
-    {/* Style 2: Quantum Iris */}
+    {/* Style 2: Polymeter Orrery */}
     <Composition
-      id="QuantumIrisViz"
-      component={QuantumIrisVisualizer as any}
+      id="PolymeterOrreryViz"
+      component={PolymeterOrreryVisualizer as any}
       durationInFrames={300}
       fps={30}
-      width={1080}
+      width={1920}
       height={1080}
       defaultProps={{
         features: defaultEmptyFeatures,
       }}
     />
 
-    {/* Style 3: Neural Synapse */}
+    {/* Style 3: Cymatic Plate */}
     <Composition
-      id="NeuralSynapseViz"
-      component={NeuralSynapseVisualizer as any}
+      id="CymaticPlateViz"
+      component={CymaticPlateVisualizer as any}
       durationInFrames={300}
       fps={30}
-      width={1080}
+      width={1920}
       height={1080}
       defaultProps={{
         features: defaultEmptyFeatures,
       }}
     />
 
-    {/* Style 4: Monolith Field */}
+    {/* Style 4: Resonant Bodies */}
     <Composition
-      id="MonolithFieldViz"
-      component={MonolithFieldVisualizer as any}
+      id="ResonantBodiesViz"
+      component={ResonantBodiesVisualizer as any}
       durationInFrames={300}
       fps={30}
-      width={1080}
+      width={1920}
       height={1080}
       defaultProps={{
         features: defaultEmptyFeatures,

@@ -14,6 +14,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from bot.services.r2_delivery import load_config as load_r2_config, upload_and_link
 from bot.services.audio_features import AudioFeatureExtractor, compute_sha256
 from bot.services.audio_adapter import AudioIntelligenceAdapter
 from bot.services.alignment import patch_word, parse_edit_command, realign_transcript, parse_offset_command, shift_words
@@ -39,6 +40,15 @@ def enabled_styles() -> list:
     wanted = [x.strip() for x in os.environ.get("AUDIOVIZ_ENABLED_STYLES", "sphere").split(",")]
     styles = [x for x in wanted if x in STYLE_CATALOG]
     return styles or ["sphere"]
+
+
+R2_LINK_EXPIRES_S = int(os.environ.get("R2_LINK_HOURS", "24")) * 3600
+
+
+def delivery_mode() -> str:
+    """document = original file (default), video = Telegram inline player (re-encoded by Telegram), both."""
+    mode = os.environ.get("AUDIOVIZ_DELIVERY", "document").strip().lower()
+    return mode if mode in ("document", "video", "both") else "document"
 
 
 def next_lyric_mode(mode: str) -> str:
@@ -443,10 +453,19 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
             shutil.copyfile(rendered_mp4, vault_dest)
             logger.info(f"📦 Successfully mirrored render to vault: {vault_dest}")
 
-        # 4. Guarantee file is under Telegram's 50MB bot upload limit (target <= 44MB)
+        # 4a. Full-quality delivery through R2 (no size limit, no Telegram re-encode)
+        r2_link = None
+        r2 = load_r2_config()
+        if r2:
+            try:
+                r2_link = await upload_and_link(r2, rendered_mp4, f"{job_id}.mp4", R2_LINK_EXPIRES_S)
+            except Exception as r2_error:
+                logger.error(f"R2 delivery failed, falling back to Telegram: {r2_error}")
+
+        # 4b. Otherwise guarantee the file is under Telegram's 50MB bot upload limit (target <= 44MB)
         file_size = os.path.getsize(rendered_mp4)
         send_path = rendered_mp4
-        if file_size > 48 * 1024 * 1024:
+        if not r2_link and file_size > 48 * 1024 * 1024:
             duration_s = max(1.0, manifest.video.frameCount / 30.0)
             target_kbits = 44 * 8 * 1024  # 44 MB safety ceiling in kbits
             audio_kbps = 128
@@ -478,11 +497,31 @@ async def handle_style_selection(callback: CallbackQuery, state: FSMContext, bot
         video_file = FSInputFile(send_path)
         if callback.message:
             await callback.message.delete()
-            await callback.message.answer_video(
-                video=video_file,
-                caption=f"✨ **Audioviz Render Complete**\nPreset: `{preset_id}` | Concurrency: 2 | 1080x1080",
-                parse_mode="Markdown",
-            )
+            caption = f"✨ **Audioviz Render Complete**\nPreset: `{preset_id}` | 1080x1080"
+            mode = delivery_mode()
+            if r2_link:
+                hours = R2_LINK_EXPIRES_S // 3600
+                size_mb = file_size / (1024 * 1024)
+                await callback.message.answer(
+                    f"Audioviz render complete ({preset_id}, 1080x1080)\nOriginal quality, {size_mb:.1f} MB\n"
+                    f"Download: {r2_link}\nThe link expires in {hours} hours.",
+                    disable_web_page_preview=True,
+                )
+                mode = "video" if mode in ("video", "both") and file_size <= 48 * 1024 * 1024 else ""
+            if mode in ("document", "both"):
+                # A document is stored as uploaded; Telegram re-encodes anything sent as a video.
+                await callback.message.answer_document(
+                    document=video_file,
+                    caption=caption + ("\nOriginal quality file." if mode == "document" else "\nOriginal quality file (the inline preview is compressed by Telegram)."),
+                    parse_mode="Markdown",
+                )
+            if mode in ("video", "both"):
+                await callback.message.answer_video(
+                    video=FSInputFile(send_path),
+                    caption=caption,
+                    parse_mode="Markdown",
+                    supports_streaming=True,
+                )
 
         # Immediate cleanup of temporary renders to prevent disk exhaustion
         for p in {rendered_mp4, send_path}:
